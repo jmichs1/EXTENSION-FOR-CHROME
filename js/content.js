@@ -672,10 +672,15 @@ function applyScrape(d) {
   } else {
     if (d.breakName) S.breakName = d.breakName;
   }
-  // Always allow spotsLeft/totalSpots updates from any source — these counters
-  // are most accurate from DOM ("X of Y left") and should not be blocked
-  if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
-  if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
+  // Update spotsLeft/totalSpots — but when API has set a known total, only accept
+  // DOM values whose total matches (prevents "14 of 328 left" overwriting a 49-spot break)
+  if (d._source === 'api' || !S._hasApiData) {
+    if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
+    if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
+  } else if (S._hasApiData && d.totalSpots > 0 && d.totalSpots === S.totalSpots) {
+    // DOM total matches API total — safe to update spotsLeft
+    if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
+  }
   S.currentBid = d.currentBid;
 
   const nmap = buildNameMap();
@@ -722,6 +727,26 @@ function applyScrape(d) {
     for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) apiAvail.add(m); else unmatchedAvail.push(raw); }
     if (unmatchedSold.length > 0 || unmatchedAvail.length > 0) {
       console.log('[BO] Unmatched API names — sold(' + unmatchedSold.length + '):', unmatchedSold.slice(0,5).join(', '), unmatchedAvail.length > 0 ? '| avail(' + unmatchedAvail.length + '): ' + unmatchedAvail.slice(0,3).join(', ') : '');
+    }
+    // Add unmatched API names as dynamic items so they appear in the grid
+    // (handles college teams, custom breaks, etc. that aren't in the static dataset)
+    for (const raw of unmatchedSold) {
+      const name = raw.replace(/\s*\([^)]*\)/g, '').trim();
+      if (name.length >= 2) {
+        apiSold.add(name);
+        if (!S.items.find(it => it.name === name)) {
+          S.items.push({ name, weight: 1, tier: null, available: false, spotNum: 0, dollarVal: 0 });
+        }
+      }
+    }
+    for (const raw of unmatchedAvail) {
+      const name = raw.replace(/\s*\([^)]*\)/g, '').trim();
+      if (name.length >= 2) {
+        apiAvail.add(name);
+        if (!S.items.find(it => it.name === name)) {
+          S.items.push({ name, weight: 1, tier: null, available: true, spotNum: 0, dollarVal: 0 });
+        }
+      }
     }
     for (const name of apiSold) { if (!S.spotOrder.includes(name)) S.spotOrder.push(name); }
     S.spotOrder = S.spotOrder.filter(n => apiSold.has(n));
@@ -863,8 +888,22 @@ function processApiBreakData(breakData, breakId) {
       S.spotsLeft = S.totalSpots - breakData.soldSpotCount;
     }
     const nmap = buildNameMap();
-    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m && !S.soldSet.has(m)) { S.soldSet.add(m); S.availSet.delete(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
-    for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m && !S.soldSet.has(m)) { S.availSet.add(m); } }
+    for (const raw of d.soldNames) {
+      const m = matchName(raw, nmap);
+      if (m && !S.soldSet.has(m)) { S.soldSet.add(m); S.availSet.delete(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); }
+      else if (!m) {
+        const name = raw.replace(/\s*\([^)]*\)/g, '').trim();
+        if (name.length >= 2) { S.soldSet.add(name); S.availSet.delete(name); if (!S.spotOrder.includes(name)) S.spotOrder.push(name); if (!S.items.find(it => it.name === name)) S.items.push({ name, weight: 1, tier: null, available: false, spotNum: 0, dollarVal: 0 }); }
+      }
+    }
+    for (const raw of d.availNames) {
+      const m = matchName(raw, nmap);
+      if (m && !S.soldSet.has(m)) { S.availSet.add(m); }
+      else if (!m) {
+        const name = raw.replace(/\s*\([^)]*\)/g, '').trim();
+        if (name.length >= 2 && !S.soldSet.has(name)) { S.availSet.add(name); if (!S.items.find(it => it.name === name)) S.items.push({ name, weight: 1, tier: null, available: true, spotNum: 0, dollarVal: 0 }); }
+      }
+    }
     for (const it of S.items) {
       if (S.soldSet.has(it.name)) it.available = false;
       else if (S.availSet.has(it.name)) it.available = true;
