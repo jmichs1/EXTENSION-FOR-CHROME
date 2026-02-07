@@ -823,6 +823,18 @@ function processApiBreakData(breakData, breakId) {
     return;
   }
 
+  // Guard: partial response — has some spots but not all; don't overwrite complete data
+  if (S._hasApiData && breakData.totalBreakSpots && spots.length < breakData.totalBreakSpots) {
+    if (breakData.title) { S.breakName = breakData.title; parseBreakTitle(breakData.title); }
+    if (breakData.totalBreakSpots) S.totalSpots = breakData.totalBreakSpots;
+    if (typeof breakData.soldSpotCount === 'number' && S.totalSpots > 0) {
+      S.spotsLeft = S.totalSpots - breakData.soldSpotCount;
+    }
+    console.log('[BO] Partial API (' + spots.length + '/' + breakData.totalBreakSpots + '), keeping current data');
+    render(true);
+    return;
+  }
+
   d.spotsLeft = d.availNames.length;
   d._source = 'api';
 
