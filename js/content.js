@@ -804,15 +804,27 @@ function processApiBreakData(breakData, breakId) {
     }
   }
 
-  d.spotsLeft = d.availNames.length;
-  d._source = 'api';
-
   // Auto-detect spotType → submode
   if (breakData.spotType && !S._manualSubmode) {
     const st = breakData.spotType.toLowerCase();
     if (st === 'team' && S.submode !== 'team') { S.submode = 'team'; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
     else if (st === 'player' && S.submode !== 'player') { S.submode = 'player'; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
   }
+
+  // Guard: if response had no spot data, only update metadata — don't wipe sold/avail
+  if (spots.length === 0) {
+    if (breakData.title) { S.breakName = breakData.title; parseBreakTitle(breakData.title); }
+    if (breakData.totalBreakSpots) S.totalSpots = breakData.totalBreakSpots;
+    if (typeof breakData.soldSpotCount === 'number' && S.totalSpots > 0) {
+      S.spotsLeft = S.totalSpots - breakData.soldSpotCount;
+    }
+    console.log('[BO] API metadata only (no spots) — breakId=' + S._breakId);
+    render(true);
+    return;
+  }
+
+  d.spotsLeft = d.availNames.length;
+  d._source = 'api';
 
   applyScrape(d);
   render(true);
