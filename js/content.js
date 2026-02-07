@@ -376,8 +376,27 @@ function matchName(raw, nmap) {
   // Strip parenthetical suffixes: (SS), (INF), (AUTO x3), etc.
   const stripped = raw.replace(/\s*\([^)]*\)/g, '').trim();
   const n = norm(stripped.length >= 3 ? stripped : raw); if (n.length < 3) return null;
+  // 1. Exact match
   if (nmap.has(n)) return nmap.get(n);
+  // 2. Substring match (both directions)
   for (const [k, v] of nmap) { if (k.length >= 5 && (n.includes(k) || k.includes(n))) return v; }
+  // 3. Try splitting on separators: " - ", " / ", " | ", leading "#N "
+  const parts = stripped.replace(/^#?\d+\s+/, '').split(/\s*[-\/|]\s*/);
+  for (const part of parts) {
+    const pn = norm(part); if (pn.length < 3 || pn === n) continue;
+    if (nmap.has(pn)) return nmap.get(pn);
+    for (const [k, v] of nmap) { if (k.length >= 5 && (pn.includes(k) || k.includes(pn))) return v; }
+  }
+  // 4. Token overlap: match if 2+ words overlap with a name map key (for "First Last Extra" or "Extra First Last")
+  const tokens = n.split(' ').filter(t => t.length >= 3);
+  if (tokens.length >= 2) {
+    for (const [k, v] of nmap) {
+      const kTokens = k.split(' ');
+      if (kTokens.length < 2) continue;
+      const overlap = tokens.filter(t => kTokens.includes(t)).length;
+      if (overlap >= 2) return v;
+    }
+  }
   return null;
 }
 function isNameCandidate(t) {
@@ -645,11 +664,19 @@ function parseBreakTitle(title) {
 }
 
 function applyScrape(d) {
-  if (d.breakName) { S.breakName = d.breakName; parseBreakTitle(d.breakName); }
-  if (d.breakType) parseBreakTitle(d.breakType);
-  if (d.productTexts) { for (const pt of d.productTexts) parseBreakTitle(pt); }
-  if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
-  if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
+  // Only run parseBreakTitle when API data hasn't been received yet (prevents resetting _hasApiData)
+  if (!S._hasApiData) {
+    if (d.breakName) { S.breakName = d.breakName; parseBreakTitle(d.breakName); }
+    if (d.breakType) parseBreakTitle(d.breakType);
+    if (d.productTexts) { for (const pt of d.productTexts) parseBreakTitle(pt); }
+  } else {
+    if (d.breakName) S.breakName = d.breakName;
+  }
+  // Don't let DOM scrape overwrite API-derived spot counts (but allow API updates through)
+  if (!S._hasApiData || d._source === 'api') {
+    if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
+    if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
+  }
   S.currentBid = d.currentBid;
 
   const nmap = buildNameMap();
@@ -690,8 +717,13 @@ function applyScrape(d) {
     S._hasApiData = true;
     const apiSold = new Set();
     const apiAvail = new Set();
-    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) apiSold.add(m); }
-    for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) apiAvail.add(m); }
+    const unmatchedSold = [];
+    const unmatchedAvail = [];
+    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) apiSold.add(m); else unmatchedSold.push(raw); }
+    for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) apiAvail.add(m); else unmatchedAvail.push(raw); }
+    if (unmatchedSold.length > 0 || unmatchedAvail.length > 0) {
+      console.log('[BO] Unmatched API names — sold(' + unmatchedSold.length + '):', unmatchedSold.slice(0,5).join(', '), unmatchedAvail.length > 0 ? '| avail(' + unmatchedAvail.length + '): ' + unmatchedAvail.slice(0,3).join(', ') : '');
+    }
     for (const name of apiSold) { if (!S.spotOrder.includes(name)) S.spotOrder.push(name); }
     S.spotOrder = S.spotOrder.filter(n => apiSold.has(n));
     S.soldSet = apiSold;
