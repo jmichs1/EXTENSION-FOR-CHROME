@@ -165,6 +165,36 @@ const NFL_TEAMS = [
 
 const NFL_PLAYERS = []; // placeholder — NFL player data TBD
 
+// Comprehensive alias map: official name → common abbreviations / nicknames
+// Handles multi-word city abbreviations (LA, NY, OKC, etc.) and nickname variants
+const TEAM_ALIASES = {
+  // NBA — 30 teams
+  "Los Angeles Lakers": ["LA Lakers"],
+  "Los Angeles Clippers": ["LA Clippers"],
+  "Golden State Warriors": ["GS Warriors", "Bay Area Warriors"],
+  "New York Knicks": ["NY Knicks"],
+  "Oklahoma City Thunder": ["OKC Thunder", "OKC"],
+  "San Antonio Spurs": ["SA Spurs"],
+  "New Orleans Pelicans": ["NO Pelicans", "NOLA Pelicans"],
+  "Portland Trail Blazers": ["Portland Blazers"],
+  "Minnesota Timberwolves": ["Minnesota Wolves", "Minnesota T-Wolves"],
+  "Philadelphia 76ers": ["Philly 76ers", "Sixers", "Philadelphia Sixers"],
+  "Cleveland Cavaliers": ["Cleveland Cavs", "Cavs"],
+  "Dallas Mavericks": ["Dallas Mavs", "Mavs"],
+  // NFL — 32 teams
+  "Kansas City Chiefs": ["KC Chiefs"],
+  "San Francisco 49ers": ["SF 49ers", "Niners", "SF Niners"],
+  "New England Patriots": ["NE Patriots", "Pats"],
+  "New York Giants": ["NY Giants"],
+  "New York Jets": ["NY Jets"],
+  "Green Bay Packers": ["GB Packers"],
+  "Tampa Bay Buccaneers": ["TB Buccaneers", "Tampa Bay Bucs", "TB Bucs", "Bucs"],
+  "Las Vegas Raiders": ["LV Raiders", "Vegas Raiders"],
+  "Los Angeles Chargers": ["LA Chargers"],
+  "Los Angeles Rams": ["LA Rams"],
+  "New Orleans Saints": ["NO Saints", "NOLA Saints"],
+};
+
 // Midnight allocation percentages (decimal fractions) — from Topps Midnight checklist
 // Teams: price-weighted allocation out of 9,000 total
 const MIDNIGHT_TEAM_ALLOC = {
@@ -335,6 +365,9 @@ function buildNameMap() {
     const p = n.split(" "); if (p.length >= 2 && p[p.length-1].length >= 4) m.set(p[p.length-1], it.name);
     const noSuffix = n.replace(/\s+(jr|sr|iii|ii|iv)\s*$/g, "").trim();
     if (noSuffix !== n && noSuffix.length >= 5) m.set(noSuffix, it.name);
+    // Add team abbreviation aliases (LA Lakers → Los Angeles Lakers, OKC → Oklahoma City Thunder, etc.)
+    const aliases = TEAM_ALIASES[it.name];
+    if (aliases) { for (const a of aliases) { const na = norm(a); if (na.length >= 2) m.set(na, it.name); } }
   }
   return m;
 }
