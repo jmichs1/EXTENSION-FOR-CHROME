@@ -702,7 +702,7 @@ function render() {
     bo.innerHTML = `<button id="xBtn" class="fab">🏀<span class="fab-badge">$${odds.evPerSpot}</span></button>`;
     bubbleToStyle(bo);
     bo.onmousedown = e => beginBDrag(e, bo);
-    bo.querySelector("#xBtn").onclick = () => { if (!wasDrag()) { S.view = "open"; render(); } };
+    bo.querySelector("#xBtn").onclick = () => { if (!wasDrag()) { G.x = Math.max(0, Math.min(G.bx + 58 - G.w, window.innerWidth - G.w)); G.y = Math.max(0, Math.min(G.by, window.innerHeight - G.h)); S.view = "open"; render(); } };
     return;
   }
 
@@ -754,7 +754,7 @@ function render() {
   // ---- WIRE EVENTS ----
   bo.querySelector("#dragH").onmousedown = e => beginDrag(e, bo);
   bo.querySelectorAll(".rz").forEach(h => { h.onmousedown = e => beginResize(e, bo, h.dataset.e); });
-  bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { S.view="collapsed"; render(); } };
+  bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { G.bx = Math.min(G.x + G.w - 58, window.innerWidth - 58); G.by = Math.max(0, G.y); S.view="collapsed"; render(); } };
   bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S._manualProduct=true; S.soldSet.clear(); loadDataset(); render(); };
   bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; S._manualUnit=true; render(); };
   bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); S._manualQty=true; render(); };
