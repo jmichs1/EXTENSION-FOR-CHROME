@@ -108,11 +108,13 @@
     if (event.data && event.data.type === 'BO_FETCH_BREAK') {
       var bid = event.data.payload && event.data.payload.breakId;
       var gql = event.data.payload && event.data.payload.query;
-      if (bid && __boGqlUrl && gql) {
+      var fetchUrl = __boGqlUrl || '/graphql';
+      if (bid && gql) {
+        console.log('[BO] MAIN fetch for breakId=' + bid + ' url=' + fetchUrl + ' hasHeaders=' + !!__boGqlHeaders);
         var fhdr = {};
         if (__boGqlHeaders) { for (var fk in __boGqlHeaders) { if (fk.toLowerCase() !== 'content-length') fhdr[fk] = __boGqlHeaders[fk]; } }
         fhdr['Content-Type'] = 'application/json';
-        origFetch(__boGqlUrl, {
+        origFetch(fetchUrl, {
           method: 'POST', headers: fhdr, credentials: 'include',
           body: JSON.stringify({ operationName: 'QueryBreak', query: gql, variables: { id: bid, getAllSpotOptions: true, getAllSpots: false, getPaginatedSpots: false, getPaginatedSpotOptions: false } })
         }).then(function(resp) {
@@ -120,9 +122,14 @@
           return resp.json();
         }).then(function(json) {
           if (json && json.data && json.data.getBreak) {
+            console.log('[BO] MAIN fetch got getBreak, spots=' + (json.data.getBreak.spotOptions ? json.data.getBreak.spotOptions.length : 0));
             post({ type: 'BO_API_DATA', payload: { breakData: json.data.getBreak, breakId: bid } });
+          } else {
+            console.log('[BO] MAIN fetch response has no getBreak data', json ? Object.keys(json) : 'null');
           }
         }).catch(function(e) { console.log('[BO] MAIN fetch error:', e.message); });
+      } else {
+        console.log('[BO] MAIN fetch skipped: bid=' + bid + ' gql=' + !!gql);
       }
     }
   });

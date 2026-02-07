@@ -768,6 +768,9 @@ const QUERY_BREAK_GQL = `query QueryBreak($id:ID!$getAllSpotOptions:Boolean=true
 function processApiBreakData(breakData, breakId) {
   if (!breakData) return;
 
+  const _spots = breakData.spotOptions || breakData.paginatedSpotOptions?.edges?.map(e => e.node) || [];
+  console.log('[BO] processApiBreakData: breakId=' + (breakId || breakData.id) + ' spots=' + _spots.length + ' total=' + (breakData.totalBreakSpots || '?') + ' hasApiData=' + S._hasApiData);
+
   // Store break ID for active fetching
   if (breakId) S._breakId = breakId;
   else if (breakData.id) S._breakId = breakData.id;
@@ -858,6 +861,7 @@ function handleApiMessage(data) {
       S._breakId = breakId;
       if (isNew) {
         S._hasApiData = false; // new break — reset API lock
+        _fetchRetryCount = 0; // reset retry counter for new break
         console.log('[BO] Break ID discovered:', breakId);
         fetchBreakSpots();
       }
@@ -884,9 +888,25 @@ function setupApiListener() {
 
 // Actively fetch break spots via GraphQL (no UI interaction needed)
 // Delegates to MAIN world script which has Whatnot's auth context + headers
+let _fetchRetryTimer = null;
+let _fetchRetryCount = 0;
 function fetchBreakSpots() {
   if (!S._breakId) return;
+  console.log('[BO] Requesting fetch for breakId=' + S._breakId + ' (attempt ' + (_fetchRetryCount + 1) + ')');
   window.postMessage({ type: 'BO_FETCH_BREAK', payload: { breakId: S._breakId, query: QUERY_BREAK_GQL } }, '*');
+  // Auto-retry if API data doesn't arrive within 3 seconds (up to 3 retries)
+  if (_fetchRetryCount < 3) {
+    if (_fetchRetryTimer) clearTimeout(_fetchRetryTimer);
+    _fetchRetryTimer = setTimeout(() => {
+      if (!S._hasApiData && S._breakId) {
+        _fetchRetryCount++;
+        console.log('[BO] API data not received, retrying fetch (attempt ' + (_fetchRetryCount + 1) + ')');
+        fetchBreakSpots();
+      } else {
+        _fetchRetryCount = 0;
+      }
+    }, 3000);
+  }
 }
 
 // ================================================================
