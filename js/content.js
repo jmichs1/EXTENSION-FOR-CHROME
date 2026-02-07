@@ -816,15 +816,15 @@ const CSS = `
 .rz-s{bottom:-4px;left:12px;right:12px;height:8px;cursor:s-resize}
 .rz-e{right:-4px;top:12px;bottom:12px;width:8px;cursor:e-resize}
 .rz-w{left:-4px;top:12px;bottom:12px;width:8px;cursor:w-resize}
-.rz-ne{top:-4px;right:-4px;width:16px;height:16px;cursor:ne-resize}
-.rz-nw{top:-4px;left:-4px;width:16px;height:16px;cursor:nw-resize}
-.rz-se{bottom:-4px;right:-4px;width:16px;height:16px;cursor:se-resize}
-.rz-sw{bottom:-4px;left:-4px;width:16px;height:16px;cursor:sw-resize}
-.rz-ne::after,.rz-nw::after,.rz-se::after,.rz-sw::after{content:'';position:absolute;width:10px;height:10px;border-color:#4a5568;border-style:solid;border-width:0;transition:border-color .15s}
-.rz-ne::after{top:2px;right:2px;border-top-width:2px;border-right-width:2px;border-radius:0 3px 0 0}
-.rz-nw::after{top:2px;left:2px;border-top-width:2px;border-left-width:2px;border-radius:3px 0 0 0}
-.rz-se::after{bottom:2px;right:2px;border-bottom-width:2px;border-right-width:2px;border-radius:0 0 3px 0}
-.rz-sw::after{bottom:2px;left:2px;border-bottom-width:2px;border-left-width:2px;border-radius:0 0 0 3px}
+.rz-ne{top:0;right:0;width:24px;height:24px;cursor:ne-resize}
+.rz-nw{top:0;left:0;width:24px;height:24px;cursor:nw-resize}
+.rz-se{bottom:0;right:0;width:24px;height:24px;cursor:se-resize}
+.rz-sw{bottom:0;left:0;width:24px;height:24px;cursor:sw-resize}
+.rz-ne::after,.rz-nw::after,.rz-se::after,.rz-sw::after{content:'';position:absolute;width:14px;height:14px;border-color:#7b8ba8;border-style:solid;border-width:0;transition:border-color .15s}
+.rz-ne::after{top:4px;right:4px;border-top-width:2.5px;border-right-width:2.5px;border-radius:0 4px 0 0}
+.rz-nw::after{top:4px;left:4px;border-top-width:2.5px;border-left-width:2.5px;border-radius:4px 0 0 0}
+.rz-se::after{bottom:4px;right:4px;border-bottom-width:2.5px;border-right-width:2.5px;border-radius:0 0 4px 0}
+.rz-sw::after{bottom:4px;left:4px;border-bottom-width:2.5px;border-left-width:2.5px;border-radius:0 0 0 4px}
 .rz-ne:hover::after,.rz-nw:hover::after,.rz-se:hover::after,.rz-sw:hover::after{border-color:#00ff87}
 
 .hd{display:flex;justify-content:space-between;align-items:flex-start;padding:10px 12px 8px;background:#0f1520;border-bottom:1px solid #1e2a45;cursor:grab;border-radius:8px 8px 0 0}
