@@ -672,11 +672,10 @@ function applyScrape(d) {
   } else {
     if (d.breakName) S.breakName = d.breakName;
   }
-  // Don't let DOM scrape overwrite API-derived spot counts (but allow API updates through)
-  if (!S._hasApiData || d._source === 'api') {
-    if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
-    if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
-  }
+  // Always allow spotsLeft/totalSpots updates from any source — these counters
+  // are most accurate from DOM ("X of Y left") and should not be blocked
+  if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
+  if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
   S.currentBid = d.currentBid;
 
   const nmap = buildNameMap();
@@ -853,19 +852,36 @@ function processApiBreakData(breakData, breakId) {
     return;
   }
 
-  // Guard: partial response — has some spots but not all; don't overwrite complete data
-  if (S._hasApiData && breakData.totalBreakSpots && spots.length < breakData.totalBreakSpots) {
-    if (breakData.title) { S.breakName = breakData.title; parseBreakTitle(breakData.title); }
+  // Partial response handling: API may return only a subset of spots (e.g. 100/328 due to pagination)
+  // Still process partial data additively for name matching, but use metadata for accurate counts
+  const isPartial = breakData.totalBreakSpots && spots.length < breakData.totalBreakSpots;
+  if (isPartial && S._hasApiData) {
+    // Merge partial spot data additively — add newly sold/available names without clearing existing sets
+    if (breakData.title) S.breakName = breakData.title;
     if (breakData.totalBreakSpots) S.totalSpots = breakData.totalBreakSpots;
     if (typeof breakData.soldSpotCount === 'number' && S.totalSpots > 0) {
       S.spotsLeft = S.totalSpots - breakData.soldSpotCount;
     }
-    console.log('[BO] Partial API (' + spots.length + '/' + breakData.totalBreakSpots + '), keeping current data');
+    const nmap = buildNameMap();
+    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m && !S.soldSet.has(m)) { S.soldSet.add(m); S.availSet.delete(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
+    for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m && !S.soldSet.has(m)) { S.availSet.add(m); } }
+    for (const it of S.items) {
+      if (S.soldSet.has(it.name)) it.available = false;
+      else if (S.availSet.has(it.name)) it.available = true;
+      else it.available = false; // default unknown to sold when we have data
+    }
+    S._lastNetworkScrape = Date.now();
+    console.log('[BO] Partial API (' + spots.length + '/' + breakData.totalBreakSpots + '), merged additively — sold:' + S.soldSet.size + ' avail:' + S.availSet.size);
     render(true);
     return;
   }
 
-  d.spotsLeft = d.availNames.length;
+  // Use API metadata (soldSpotCount) for accurate spotsLeft when available
+  if (typeof breakData.soldSpotCount === 'number' && breakData.totalBreakSpots) {
+    d.spotsLeft = breakData.totalBreakSpots - breakData.soldSpotCount;
+  } else {
+    d.spotsLeft = d.availNames.length;
+  }
   d._source = 'api';
 
   applyScrape(d);
