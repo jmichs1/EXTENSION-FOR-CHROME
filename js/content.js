@@ -298,7 +298,7 @@ const G = { x: 0, y: 0, w: 340, h: window.innerHeight, bx: 10, by: 70 };
 const S = {
   league: "nba", submode: "player", _manualLeague: false, _manualSubmode: false, items: [], view: "open",
   filter: "all", search: "", sort: "value-desc",
-  breakName: null, spotsLeft: null, totalSpots: 0, soldSet: new Set(),
+  breakName: null, spotsLeft: null, totalSpots: 0, soldSet: new Set(), availSet: new Set(),
   productId: "sapphire", unit: "box", qty: 1,
   _manualProduct: false,   // user manually selected product type
   _manualUnit: false,      // user manually selected box/case
@@ -310,8 +310,8 @@ const S = {
   _saleCommitted: false,   // already added revenue for this auction cycle?
   _lastNetworkScrape: null, // timestamp of last successful API data
   _breakId: null,           // current break ID from intercepted API
-  soldOrder: [],            // [{name, pickNum, price, time}] — draft pick order
-  _pickCounter: 0,          // next pick number
+  spotOrder: [],            // string[] — names in pick order
+  currentBid: null,         // current auction bid price
 };
 
 function loadDataset() {
@@ -320,7 +320,7 @@ function loadDataset() {
   else if (S.league === "nba" && S.submode === "team") src = NBA_TEAMS;
   else if (S.league === "nfl" && S.submode === "player") src = NFL_PLAYERS;
   else src = NFL_TEAMS;
-  S.items = src.map(s => ({ name: s.name, weight: s.weight, tier: s.tier || null, available: !S.soldSet.has(s.name) }));
+  S.items = src.map(s => ({ name: s.name, weight: s.weight, tier: s.tier || null, available: !S.soldSet.has(s.name), spotNum: 0, dollarVal: 0 }));
 }
 
 // ================================================================
@@ -329,7 +329,12 @@ function loadDataset() {
 function norm(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim(); }
 function buildNameMap() {
   const m = new Map();
-  for (const it of S.items) { const n = norm(it.name); m.set(n, it.name); const p = n.split(" "); if (p.length >= 2 && p[p.length-1].length >= 4) m.set(p[p.length-1], it.name); }
+  for (const it of S.items) {
+    const n = norm(it.name); m.set(n, it.name);
+    const p = n.split(" "); if (p.length >= 2 && p[p.length-1].length >= 4) m.set(p[p.length-1], it.name);
+    const noSuffix = n.replace(/\s+(jr|sr|iii|ii|iv)\s*$/g, "").trim();
+    if (noSuffix !== n && noSuffix.length >= 5) m.set(noSuffix, it.name);
+  }
   return m;
 }
 function matchName(raw, nmap) {
@@ -340,14 +345,13 @@ function matchName(raw, nmap) {
 }
 function isNameCandidate(t) {
   if (t.length < 3 || t.length > 60) return false;
-  if (/^(Sold|Available|How|Random|See|Show|Break|Spot|Ship|\$|\d|Upcoming|Giveaway|Filter|Sort|Auction|Qty|Bid|Custom)/i.test(t)) return false;
-  if (/^Coming\s*Up$/i.test(t)) return false;
-  if (/spots?\s*\(/i.test(t) || /^\d+\s+(of|left)/i.test(t) || /Filling|left|Taxes|Search/i.test(t)) return false;
+  if (/^(Sold|Available|Coming|How|Random|See|Show|Break|Spot|Ship|\$|\d|Upcoming|Giveaway|Filter|Sort|Auction|Qty|Bid|Custom|Follow|Chat|Watch)/i.test(t)) return false;
+  if (/spots?\s*\(/i.test(t) || /^\d+\s+(of|left)/i.test(t) || /Filling|left|Taxes|Search|Shipping/i.test(t)) return false;
   const lt = (t.match(/[a-zA-Z]/g)||[]).length; return lt >= 3 && lt >= t.length * 0.4;
 }
 
 function scrape() {
-  const r = { breakName:null, spotsLeft:null, totalSpots:0, availNames:[], soldNames:[], auctionPrice:null };
+  const r = { breakName:null, spotsLeft:null, totalSpots:0, availNames:[], soldNames:[], auctionPrice:null, currentBid:null, currentSoldName:null };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const texts = []; let nd;
   while ((nd = walker.nextNode())) { const t = nd.textContent.trim(); if (t.length >= 2 && t.length < 500) texts.push({ t, el: nd.parentElement }); }
@@ -364,6 +368,38 @@ function scrape() {
   }
   for (const {t} of texts) { const m = t.match(/(\d+)\s+of\s+(\d+)\s+left/i); if (m) { r.spotsLeft = +m[1]; r.totalSpots = +m[2]; break; } }
   if (r.spotsLeft === null) { for (const {t} of texts) { const m = t.match(/(\d+)\s+left/i); if (m) { r.spotsLeft = +m[1]; break; } } }
+
+  // --- Detect current bid price near "Bids" text ---
+  let bidsRect = null;
+  for (const {t, el} of texts) {
+    if (/^\d+\s+Bids?$/i.test(t) || /^Bid/i.test(t)) {
+      const rc = el.getBoundingClientRect();
+      if (rc.width > 0 && rc.height > 0 && rc.top > window.innerHeight * 0.3) { bidsRect = rc; break; }
+    }
+  }
+  let bestBidPrice = null, bestBidDist = Infinity;
+  for (const {t, el} of texts) {
+    const pm = t.match(/^\$\s*([\d,]+(?:\.\d{1,2})?)$/);
+    if (!pm) continue;
+    const price = parseFloat(pm[1].replace(/,/g, ""));
+    if (price <= 1 || price > 100000) continue;
+    const rc = el.getBoundingClientRect();
+    if (rc.width === 0 || rc.height === 0) continue;
+    if (el.closest("#break-odds-root")) continue;
+    if (bidsRect) {
+      const dy = Math.abs(rc.top - bidsRect.top);
+      if (dy < 80 && dy < bestBidDist) { bestBidDist = dy; bestBidPrice = price; }
+    } else {
+      const inAuctionZone = rc.top > window.innerHeight * 0.55 && rc.top < window.innerHeight * 0.95
+        && rc.left > window.innerWidth * 0.15 && rc.left < window.innerWidth * 0.85;
+      if (inAuctionZone) {
+        const fontSize = parseFloat(window.getComputedStyle(el).fontSize) || 12;
+        const score = fontSize * 10 - Math.abs(rc.top - window.innerHeight * 0.8);
+        if (score > bestBidDist * -1 || bestBidPrice === null) { bestBidDist = -score; bestBidPrice = price; }
+      }
+    }
+  }
+  if (bestBidPrice !== null) r.currentBid = bestBidPrice;
 
   // --- Detect auction state from Whatnot stream area ---
   // Lifecycle: bidding ($25 + timer) → sold ($26 + "Sold") → "Awaiting next item"
@@ -419,6 +455,19 @@ function scrape() {
       }
     }
     if (bestName) r.auctionName = bestName;
+
+    // Dash-pattern sold name extraction: "Cooper Flagg - $125 (Auto)" → "Cooper Flagg"
+    for (const {t, el} of texts) {
+      if (t.length < 10 || t.length > 200) continue;
+      const rc = el.getBoundingClientRect();
+      if (rc.width === 0) continue;
+      if (Math.abs(rc.top - soldRect.top) > 80) continue;
+      const dashIdx = t.lastIndexOf(" - ");
+      if (dashIdx >= 0) {
+        const tail = t.substring(dashIdx + 3).replace(/\s*\(Auto\)\s*/gi,"").replace(/,\s*$/,"").trim();
+        if (tail.length >= 3 && tail.length <= 50) r.currentSoldName = tail;
+      }
+    }
   }
 
   // 2c. Also detect "Coming Up" item — the item currently being shown/auctioned
@@ -501,9 +550,9 @@ function parseBreakTitle(title) {
   // League detection (skip if user manually selected)
   if (!S._manualLeague) {
     if ((/\bNBA\b/i.test(t) || /\bBASKETBALL\b/i.test(t)) && S.league !== "nba") {
-      S.league = "nba"; S.soldSet.clear(); loadDataset();
+      S.league = "nba"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     } else if ((/\bNFL\b/i.test(t) || /\bFOOTBALL\b/i.test(t)) && S.league !== "nfl") {
-      S.league = "nfl"; S.soldSet.clear(); loadDataset();
+      S.league = "nfl"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     }
   }
 
@@ -511,9 +560,9 @@ function parseBreakTitle(title) {
   // Skip if user manually toggled submode
   if (!S._manualSubmode) {
     if (/\bTEAM\s*(BREAK|RANDOM)|\bRANDOM\s*TEAM\b|\bTEAM\b/i.test(t) && S.submode !== "team") {
-      S.submode = "team"; S.soldSet.clear(); loadDataset();
+      S.submode = "team"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     } else if (/\bPLAYER\s*(BREAK|RANDOM)|\bRANDOM\s*PLAYER\b|\bPLAYER\b/i.test(t) && S.submode !== "player") {
-      S.submode = "player"; S.soldSet.clear(); loadDataset();
+      S.submode = "player"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     }
   }
 }
@@ -521,85 +570,115 @@ function parseBreakTitle(title) {
 function applyScrape(d) {
   if (d.breakName) { S.breakName = d.breakName; parseBreakTitle(d.breakName); }
   if (d.breakType) parseBreakTitle(d.breakType);
-  // Feed additional product text snippets into auto-detect
   if (d.productTexts) { for (const pt of d.productTexts) parseBreakTitle(pt); }
   if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
   if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
+  S.currentBid = d.currentBid;
 
   const nmap = buildNameMap();
 
   // === REVENUE STATE MACHINE ===
-  // Capture price whenever "Sold" is visible with a valid amount
   if (d.hasSold && d.auctionPrice && d.auctionPrice > 1) {
     S.lastPrice = d.auctionPrice;
   }
-
-  // TRIGGER: "Sold" just appeared (was NOT sold last scrape → now IS sold)
-  // OR: "Awaiting" just appeared as backup
   const soldJustAppeared = d.hasSold && !S._wasSold;
   const awaitJustAppeared = d.awaiting && !S._wasAwaiting;
-
-  // Track the currently auctioning item name
   if (d.auctionName) S._currentAuctionItem = d.auctionName;
   else if (d.comingUp) S._currentAuctionItem = d.comingUp;
 
   if ((soldJustAppeared || awaitJustAppeared) && !S._saleCommitted) {
-    // Mark the auctioned item as sold + track pick order
     if (S._currentAuctionItem) {
       S.soldSet.add(S._currentAuctionItem);
-      if (!S.soldOrder.some(e => e.name === S._currentAuctionItem)) {
-        S._pickCounter++;
-        S.soldOrder.push({ name: S._currentAuctionItem, pickNum: S._pickCounter, price: S.lastPrice || null, time: Date.now() });
-      }
-      console.log("[BO] ✅ Pick #" + S._pickCounter + ": " + S._currentAuctionItem + (S.lastPrice ? " for $" + S.lastPrice : ""));
+      S.availSet.delete(S._currentAuctionItem);
+      if (!S.spotOrder.includes(S._currentAuctionItem)) S.spotOrder.push(S._currentAuctionItem);
+      console.log("[BO] Pick #" + S.spotOrder.length + ": " + S._currentAuctionItem + (S.lastPrice ? " for $" + S.lastPrice : ""));
     }
     if (S.lastPrice) {
       S.revenue += S.lastPrice;
       S.bids.push({ a: S.lastPrice, t: Date.now(), auto: true });
     }
     S._saleCommitted = true;
-    S._currentAuctionItem = null; // consumed
+    S._currentAuctionItem = null;
   }
-
-  // Reset when auction cycle resets (no longer sold or awaiting)
   if (!d.hasSold && !d.awaiting) {
     S._saleCommitted = false;
     S.lastPrice = null;
   }
-
-  // Track state for next scrape
   S._wasSold = !!d.hasSold;
   S._wasAwaiting = !!d.awaiting;
 
-  // --- SOLD/AVAILABLE NAME PROCESSING (source-aware) ---
+  // === SOLD/AVAILABLE DETECTION (v14 dual tracking) ===
   if (d._source === 'api') {
-    // API data is authoritative — rebuild soldSet and reconcile soldOrder
+    // API data is authoritative
     const apiSold = new Set();
+    const apiAvail = new Set();
     for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) apiSold.add(m); }
-    // Add newly sold items to soldOrder (items in API but not yet tracked)
-    for (const name of apiSold) {
-      if (!S.soldOrder.some(e => e.name === name)) {
-        S._pickCounter++;
-        S.soldOrder.push({ name, pickNum: S._pickCounter, price: null, time: Date.now() });
+    for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) apiAvail.add(m); }
+    for (const name of apiSold) { if (!S.spotOrder.includes(name)) S.spotOrder.push(name); }
+    S.spotOrder = S.spotOrder.filter(n => apiSold.has(n));
+    S.soldSet = apiSold;
+    S.availSet = apiAvail;
+  } else {
+    // DOM-based dual tracking
+    // Mark current sold player from auction title dash pattern
+    if (d.currentSoldName) {
+      const soldPlayer = matchName(d.currentSoldName, nmap);
+      if (soldPlayer) {
+        S.availSet.delete(soldPlayer);
+        if (!S.soldSet.has(soldPlayer)) {
+          S.soldSet.add(soldPlayer);
+          if (!S.spotOrder.includes(soldPlayer)) S.spotOrder.push(soldPlayer);
+          console.log("[BO] Sold: " + soldPlayer);
+        }
       }
     }
-    // Remove items that API says are actually available (error corrections)
-    S.soldOrder = S.soldOrder.filter(e => apiSold.has(e.name));
-    S.soldOrder.forEach((e, i) => { e.pickNum = i + 1; });
-    S._pickCounter = S.soldOrder.length;
-    S.soldSet = apiSold;
-  } else if (!S._lastNetworkScrape || Date.now() - S._lastNetworkScrape > 60000) {
-    // DOM scraper fallback: only process if no fresh API data (>60s stale)
-    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) S.soldSet.add(m); }
-    if (d.availNames.length >= 5) {
-      const availSet = new Set();
-      for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) { S.soldSet.delete(m); availSet.add(m); } }
-      if (availSet.size >= 3) { for (const it of S.items) { if (!availSet.has(it.name)) S.soldSet.add(it.name); } }
+    // Accumulate confirmed sold names from DOM
+    for (const raw of d.soldNames) {
+      const m = matchName(raw, nmap);
+      if (m) { S.availSet.delete(m); if (!S.soldSet.has(m)) { S.soldSet.add(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
+    }
+    // Accumulate confirmed available names from DOM
+    for (const raw of d.availNames) {
+      const m = matchName(raw, nmap);
+      if (m) { S.availSet.add(m); S.soldSet.delete(m); const idx = S.spotOrder.indexOf(m); if (idx >= 0) S.spotOrder.splice(idx, 1); }
     }
   }
-  // else: DOM scraper with fresh API data — skip avail/sold, keep API state
 
-  for (const it of S.items) it.available = !S.soldSet.has(it.name);
+  // === COUNTER RECONCILIATION ===
+  const expectedSold = (S.spotsLeft !== null && S.totalSpots > 0) ? S.totalSpots - S.spotsLeft : null;
+
+  // Step 1: Set status for confirmed players
+  for (const it of S.items) {
+    if (S.soldSet.has(it.name)) { it.available = false; }
+    else if (S.availSet.has(it.name)) { it.available = true; }
+    else { it.available = true; }
+  }
+
+  // Step 2: If counter says more should be sold, mark cheapest unconfirmed as sold
+  if (expectedSold !== null) {
+    const confirmedSold = S.items.filter(i => !i.available).length;
+    if (confirmedSold < expectedSold) {
+      const allocMap = getAllocMap(S.productId, S.league, S.submode);
+      const totalPlayers = S.items.length;
+      const unconfirmed = S.items.filter(i => i.available && !S.availSet.has(i.name));
+      unconfirmed.sort((a, b) => {
+        const allocA = allocMap?.[a.name] || (1 / totalPlayers);
+        const allocB = allocMap?.[b.name] || (1 / totalPlayers);
+        return allocA - allocB;
+      });
+      let needed = expectedSold - confirmedSold;
+      for (const it of unconfirmed) {
+        if (needed <= 0) break;
+        it.available = false;
+        needed--;
+      }
+    }
+  }
+
+  // Step 3: Assign pick numbers
+  for (const it of S.items) {
+    it.spotNum = S.spotOrder.indexOf(it.name) >= 0 ? S.spotOrder.indexOf(it.name) + 1 : 0;
+  }
 }
 
 // ================================================================
@@ -625,8 +704,9 @@ function processApiBreakData(breakData, breakId) {
     availNames: [],
     soldNames: [],
     auctionPrice: null,
+    currentBid: null,
+    currentSoldName: null,
     productTexts: breakData.title ? [breakData.title] : [],
-    // Don't touch auction state — that comes from DOM scraper
     hasSold: false,
     awaiting: false,
     auctionName: null,
@@ -654,12 +734,12 @@ function processApiBreakData(breakData, breakId) {
   // Auto-detect spotType → submode
   if (breakData.spotType && !S._manualSubmode) {
     const st = breakData.spotType.toLowerCase();
-    if (st === 'team' && S.submode !== 'team') { S.submode = 'team'; S.soldSet.clear(); loadDataset(); }
-    else if (st === 'player' && S.submode !== 'player') { S.submode = 'player'; S.soldSet.clear(); loadDataset(); }
+    if (st === 'team' && S.submode !== 'team') { S.submode = 'team'; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
+    else if (st === 'player' && S.submode !== 'player') { S.submode = 'player'; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
   }
 
   applyScrape(d);
-  render();
+  render(true);
   S._lastNetworkScrape = Date.now();
   console.log('[BO] API data: ' + d.soldNames.length + ' sold, ' + d.availNames.length + ' available (breakId=' + S._breakId + ')');
 }
@@ -753,13 +833,13 @@ function calc() {
   const allocMap = getAllocMap(S.productId, S.league, S.submode);
   let remainingValue = 0;
   for (const i of S.items) {
+    const alloc = allocMap?.[i.name] || (1 / totalPlayers);
+    i.dollarVal = totalValue * alloc;
     if (i.available && remaining > 0) {
-      const alloc = allocMap?.[i.name] || (1 / totalPlayers);
-      i.dollarVal = totalValue * alloc;
       i.livePct = (1 / remaining) * 100;
       i.ev = (1 / remaining) * i.dollarVal;
       remainingValue += i.dollarVal;
-    } else { i.livePct = 0; i.dollarVal = 0; i.ev = 0; }
+    } else { i.livePct = 0; i.ev = 0; }
   }
   const evPerSpot = remaining > 0 ? (remainingValue / remaining) : 0;
   const boxCost = product.box * S.qty, caseCost = product.case * S.qty;
@@ -834,8 +914,16 @@ function wasDrag() { return IX.moved; }
 // ================================================================
 // RENDER
 // ================================================================
-function render() {
+function render(force) {
   if (IX.type) return;  // NEVER re-render during drag/resize
+  if (!force) {
+    const active = shadow.activeElement || shadow.querySelector(":focus");
+    if (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) return;
+  }
+
+  // Save scroll position
+  const lb = shadow.getElementById("lb");
+  const scrollY = lb ? lb.scrollTop : 0;
 
   const bo = shadow.getElementById("bo");
   if (!bo) return;
@@ -847,56 +935,86 @@ function render() {
   // ---- COLLAPSED ----
   if (S.view === "collapsed") {
     bo.className = "collapsed";
-    const fabIcon = S.league === "nfl" ? "🏈" : "🏀";
-    bo.innerHTML = `<button id="xBtn" class="fab">${fabIcon}<span class="fab-badge">$${odds.evPerSpot}</span></button>`;
+    const fabIcon = S.league === "nfl" ? "\uD83C\uDFC8" : "\uD83C\uDFC0";
+    const badgeText = S.currentBid !== null ? (() => {
+      const ev = parseFloat(odds.evPerSpot);
+      const diff = ev - S.currentBid;
+      return diff >= 0 ? "+$" + diff.toFixed(0) : "-$" + Math.abs(diff).toFixed(0);
+    })() : "$" + odds.evPerSpot;
+    bo.innerHTML = `<button id="xBtn" class="fab">${fabIcon}<span class="fab-badge">${badgeText}</span></button>`;
     bubbleToStyle(bo);
     bo.onmousedown = e => beginBDrag(e, bo);
-    bo.querySelector("#xBtn").onclick = () => { if (!wasDrag()) { G.x = Math.max(0, Math.min(G.bx + 77 - G.w, window.innerWidth - G.w)); G.y = Math.max(0, Math.min(G.by, window.innerHeight - G.h)); S.view = "open"; render(); } };
+    bo.querySelector("#xBtn").onclick = () => { if (!wasDrag()) { G.x = Math.max(0, Math.min(G.bx + 77 - G.w, window.innerWidth - G.w)); G.y = Math.max(0, Math.min(G.by, window.innerHeight - G.h)); S.view = "open"; render(true); } };
     return;
   }
 
   // ---- OPEN ----
   bo.className = "panel";
-  bo.onmousedown = null;  // clear stale bubble drag handler from collapsed mode
+  bo.onmousedown = null;
   geoToStyle(bo);
 
   const brkLine = S.breakName ? S.breakName.substring(0, 55) + (S.breakName.length > 55 ? "..." : "") : "Waiting for data...";
   const cntLine = S.spotsLeft !== null ? `${S.spotsLeft} of ${S.totalSpots} left` : "";
 
   let items = [...S.items];
-  const sortFn = (a, b) => { switch(S.sort) { case "name-asc": return a.name.localeCompare(b.name); case "name-desc": return b.name.localeCompare(a.name); case "value-asc": return a.dollarVal - b.dollarVal; default: return b.dollarVal - a.dollarVal; } };
-  items.sort((a, b) => { if (a.available !== b.available) return a.available ? -1 : 1; return sortFn(a, b); });
+
+  // Sort (v14 approach: pure column sort, no avail/sold separation)
+  const dir = S.sort.endsWith("-asc") ? 1 : -1;
+  const col = S.sort.replace(/-asc$|-desc$/, "");
+  switch (col) {
+    case "name": items.sort((a, b) => dir * a.name.localeCompare(b.name)); break;
+    case "value": items.sort((a, b) => dir * (a.dollarVal - b.dollarVal)); break;
+    case "pick": items.sort((a, b) => {
+      const ap = a.spotNum || 0, bp = b.spotNum || 0;
+      if (ap && !bp) return -1; if (!ap && bp) return 1;
+      if (!ap && !bp) return a.name.localeCompare(b.name);
+      return dir * (ap - bp);
+    }); break;
+  }
+
   if (S.filter === "available") items = items.filter(i => i.available);
   else if (S.filter === "sold") items = items.filter(i => !i.available);
-  else if (S.filter === "high") items = items.filter(i => i.dollarVal > 50);
+  else if (S.filter === "high") items = items.filter(i => i.dollarVal > 100);
   if (S.search) { const q = S.search.toLowerCase(); items = items.filter(i => i.name.toLowerCase().includes(q)); }
 
   let rows = "";
   for (const it of items) {
     const cls = it.available ? "av" : "sd";
-    const pick = !it.available ? S.soldOrder.find(e => e.name === it.name) : null;
-    const valStr = it.available ? "$" + it.dollarVal.toFixed(0) : (pick ? `#${pick.pickNum}` : "SOLD");
-    const valCls = it.available ? (it.dollarVal > 500 ? "hot" : it.dollarVal > 50 ? "warm" : "") : (pick ? "pick" : "");
-    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><button class="tb">${it.available?"−":"+"}</button><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span></div>`;
+    const valStr = "$" + (it.dollarVal >= 1000 ? it.dollarVal.toLocaleString(undefined,{maximumFractionDigits:0}) : it.dollarVal.toFixed(0));
+    const valCls = it.dollarVal > 500 ? "hot" : it.dollarVal > 100 ? "warm" : "";
+    const pickStr = it.spotNum > 0 ? `#${it.spotNum}` : "";
+    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span><span class="rs">${pickStr}</span><button class="tb">${it.available?"\u2212":"+"}</button></div>`;
   }
   const fBtn = (f,l) => `<button class="fb${S.filter===f?" fa":""}" data-f="${f}">${l}</button>`;
+  const sortArrow = (c) => {
+    const isActive = col === c;
+    const arrow = isActive ? (dir === 1 ? "\u25B2" : "\u25BC") : "\u25BD";
+    return `<span class="sha${isActive?" sha-on":""}" data-col="${c}">${arrow}</span>`;
+  };
   const prodOpts = PRODUCTS.map(p=>`<option value="${p.id}"${S.productId===p.id?" selected":""}>${p.name}</option>`).join("");
   const qtyOpts = Array.from({length:10},(_,i)=>`<option value="${i+1}"${S.qty===(i+1)?" selected":""}>${i+1}</option>`).join("");
   const product = PRODUCTS.find(p=>p.id===S.productId)||PRODUCTS[0];
   const unitPrice = S.unit==="case"?product.case:product.box;
-  const si = (col) => S.sort.startsWith(col) ? (S.sort.endsWith("asc") ? " ▲" : " ▼") : "";
 
   bo.innerHTML = `
-    <div class="hd" id="dragH"><div class="hl"><span class="lg">🏀 BREAK ODDS</span><span class="bn">${brkLine}</span>${cntLine?`<span class="cl">${cntLine}</span>`:""}</div><div class="hb"><button id="colBtn" class="ib" title="Collapse">◁</button></div></div>
-    <div class="psel"><select id="prodSel" class="sel">${prodOpts}</select><div class="prow"><select id="unitSel" class="sel sm"><option value="box"${S.unit==="box"?" selected":""}>Box</option><option value="case"${S.unit==="case"?" selected":""}>Case</option></select><span class="px">×</span><select id="qtySel" class="sel sm">${qtyOpts}</select><span class="ptotal">= $${(unitPrice*S.qty).toLocaleString()}</span></div></div>
-
-    <div class="mb"><button class="lg-btn${S.league==="nba"?" ma":""}" data-lg="nba">🏀 NBA</button><button class="lg-btn${S.league==="nfl"?" ma":""}" data-lg="nfl">🏈 NFL</button></div>
-    <div class="mb sub"><button class="sm-btn${S.submode==="player"?" ma":""}" data-sm="player">🃏 Player</button><button class="sm-btn${S.submode==="team"?" ma":""}" data-sm="team">🏅 Team</button></div>
+    <div class="hd" id="dragH"><div class="hl"><span class="lg">\uD83C\uDFC0 BREAK ODDS</span><span class="bn">${brkLine}</span>${cntLine?`<span class="cl">${cntLine}</span>`:""}</div><div class="hb"><button id="colBtn" class="ib" title="Collapse">\u25C1</button></div></div>
+    <div class="psel"><select id="prodSel" class="sel">${prodOpts}</select><div class="prow"><select id="unitSel" class="sel sm"><option value="box"${S.unit==="box"?" selected":""}>Box</option><option value="case"${S.unit==="case"?" selected":""}>Case</option></select><span class="px">\u00D7</span><select id="qtySel" class="sel sm">${qtyOpts}</select><span class="ptotal">= $${(unitPrice*S.qty).toLocaleString()}</span></div></div>
+    <div class="mb"><button class="lg-btn${S.league==="nba"?" ma":""}" data-lg="nba">\uD83C\uDFC0 NBA</button><button class="lg-btn${S.league==="nfl"?" ma":""}" data-lg="nfl">\uD83C\uDFC8 NFL</button></div>
+    <div class="mb sub"><button class="sm-btn${S.submode==="player"?" ma":""}" data-sm="player">\uD83C\uDCCF Player</button><button class="sm-btn${S.submode==="team"?" ma":""}" data-sm="team">\uD83C\uDFC5 Team</button></div>
     <div class="sb"><div class="s"><span class="sv">${odds.avail}</span><span class="sn">Avail</span></div><div class="s"><span class="sv">${odds.sold}</span><span class="sn">Sold</span></div><div class="s"><span class="sv">${odds.total}</span><span class="sn">Total</span></div><div class="s ev"><span class="sv">$${odds.evPerSpot}</span><span class="sn">EV/Spot</span></div></div>
+    ${S.currentBid !== null ? (() => {
+      const ev = parseFloat(odds.evPerSpot);
+      const diff = ev - S.currentBid;
+      const isGood = diff >= 0;
+      const diffStr = isGood ? "+$" + diff.toFixed(0) : "-$" + Math.abs(diff).toFixed(0);
+      const cls2 = isGood ? "deal-good" : "deal-bad";
+      const icon = isGood ? "\u2705" : "\u26A0\uFE0F";
+      return `<div class="deal ${cls2}"><span class="deal-bid">BID: $${S.currentBid}</span><span class="deal-vs">vs</span><span class="deal-ev">EV: $${ev.toFixed(0)}</span><span class="deal-diff">${icon} ${diffStr}</span></div>`;
+    })() : '<div class="deal deal-wait">Waiting for bid...</div>'}
     <div class="tb2"><input type="text" id="srch" class="si" placeholder="Search..." value="${S.search||""}"><div class="fr">${fBtn("all","All")}${fBtn("available","Avail")}${fBtn("sold","Sold")}${fBtn("high","High$")}</div></div>
-    <div class="lh"><span></span><span></span><span class="sh" data-s="name">Name${si("name")}</span><span class="sh" data-s="value">Value${si("value")}</span></div>
+    <div class="lh"><span></span><span class="lhc" data-col="name">Name ${sortArrow("name")}</span><span class="lhc" data-col="value">Value ${sortArrow("value")}</span><span class="lhc" data-col="pick">Pick ${sortArrow("pick")}</span><span></span></div>
     <div id="lb" class="lb">${rows}</div>
-    <div class="ft"><button id="syncB" class="ftb accent">⟳ Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
+    <div class="ft"><button id="syncB" class="ftb accent">\u27F3 Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
     <div class="rz rz-n" data-e="n"></div><div class="rz rz-s" data-e="s"></div><div class="rz rz-e" data-e="e"></div><div class="rz rz-w" data-e="w"></div>
     <div class="rz rz-ne" data-e="ne"></div><div class="rz rz-nw" data-e="nw"></div><div class="rz rz-se" data-e="se"></div><div class="rz rz-sw" data-e="sw"></div>
   `;
@@ -904,29 +1022,38 @@ function render() {
   // ---- WIRE EVENTS ----
   bo.querySelector("#dragH").onmousedown = e => beginDrag(e, bo);
   bo.querySelectorAll(".rz").forEach(h => { h.onmousedown = e => beginResize(e, bo, h.dataset.e); });
-  bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { G.bx = Math.max(10, Math.min(G.x + G.w - 90, window.innerWidth - 100)); G.by = Math.max(60, Math.min(G.y + 6, window.innerHeight - 100)); S.view="collapsed"; render(); } };
-  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S._manualProduct=true; S.soldSet.clear(); loadDataset(); render(); };
-  bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; S._manualUnit=true; render(); };
-  bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); S._manualQty=true; render(); };
+  bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { G.bx = Math.max(10, Math.min(G.x + G.w - 90, window.innerWidth - 100)); G.by = Math.max(60, Math.min(G.y + 6, window.innerHeight - 100)); S.view="collapsed"; render(true); } };
+  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S._manualProduct=true; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); render(true); };
+  bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; S._manualUnit=true; render(true); };
+  bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); S._manualQty=true; render(true); };
 
+  bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S._manualLeague=true;S.soldSet.clear();S.availSet.clear();S.spotOrder=[];loadDataset();doScrape();} });
+  bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S._manualSubmode=true;S.soldSet.clear();S.availSet.clear();S.spotOrder=[];loadDataset();doScrape();} });
+  // Column header sort
+  bo.querySelectorAll(".lhc").forEach(h => h.onclick = () => {
+    const c = h.dataset.col;
+    if (col === c) { S.sort = c + (dir === -1 ? "-asc" : "-desc"); }
+    else { S.sort = c + "-desc"; }
+    render(true);
+  });
+  bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render(true);} });
+  bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(true); };
+  bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); render(true); };
+  bo.querySelector("#clB").onclick = () => { S.availSet.clear(); S.items.forEach(i=>{i.available=false;S.soldSet.add(i.name);}); render(true); };
+  bo.querySelector("#syncB").onclick = () => { S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); doScrape(); };
+  // Toggle buttons in rows
+  bo.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available){S.soldSet.delete(nm);S.availSet.add(nm);const idx=S.spotOrder.indexOf(nm);if(idx>=0)S.spotOrder.splice(idx,1);}else{S.soldSet.add(nm);S.availSet.delete(nm);if(!S.spotOrder.includes(nm))S.spotOrder.push(nm);} it.spotNum=S.spotOrder.indexOf(nm)>=0?S.spotOrder.indexOf(nm)+1:0; render(true); }; });
 
-
-  bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S._manualLeague=true;S.soldSet.clear();loadDataset();doScrape();} });
-  bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S._manualSubmode=true;S.soldSet.clear();loadDataset();doScrape();} });
-  bo.querySelectorAll(".sh").forEach(h => h.onclick = () => { const col = h.dataset.s; S.sort = S.sort === col + "-desc" ? col + "-asc" : col + "-desc"; render(); });
-  bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render();} });
-  bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(); };
-  bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.soldOrder=[]; S._pickCounter=0; S.items.forEach(i=>i.available=true); render(); };
-  bo.querySelector("#clB").onclick = () => { S.items.forEach(i=>{i.available=false;S.soldSet.add(i.name);}); render(); };
-  bo.querySelector("#syncB").onclick = () => { S.soldSet.clear(); S.soldOrder=[]; S._pickCounter=0; S.items.forEach(i=>i.available=true); doScrape(); };
-  bo.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available){S.soldSet.delete(nm);S.soldOrder=S.soldOrder.filter(e=>e.name!==nm);S.soldOrder.forEach((e,i)=>{e.pickNum=i+1});S._pickCounter=S.soldOrder.length;}else{S.soldSet.add(nm);S._pickCounter++;S.soldOrder.push({name:nm,pickNum:S._pickCounter,price:null,time:Date.now()});} render(); }; });
+  // Restore scroll position
+  const newLb = bo.querySelector("#lb");
+  if (newLb && scrollY > 0) newLb.scrollTop = scrollY;
 
   if (S.search) { const sb=bo.querySelector("#srch"); sb.focus(); sb.setSelectionRange(S.search.length,S.search.length); }
 }
 
 function doScrape() {
   if (!S._breakId) discoverBreakId();
-  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| sold?:",!!d.hasSold,"| $:",d.auctionPrice,"| name:",d.auctionName||"-","| coming:",d.comingUp||"-","| avail:",d.availNames.length,"| sold:",d.soldNames.length,"| soldSet:",S.soldSet.size); applyScrape(d); const active=shadow.activeElement; if(active&&(active.tagName==='SELECT'||active.tagName==='INPUT')) return; render(); } catch(e){console.error("[BO] err:",e);}
+  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| soldSet:",S.soldSet.size,"| availSet:",S.availSet.size,"| bid:$"+d.currentBid); applyScrape(d); render(); } catch(e){console.error("[BO] err:",e);}
 }
 
 
@@ -943,7 +1070,7 @@ function startAuto() {
 // TOGGLE from extension icon
 // ================================================================
 chrome.runtime.onMessage.addListener(msg => {
-  if (msg.type === "TOGGLE_PANEL") { S.view = S.view==="open"?"collapsed":S.view==="collapsed"?"open":"open"; render(); }
+  if (msg.type === "TOGGLE_PANEL") { S.view = S.view==="open"?"collapsed":S.view==="collapsed"?"open":"open"; render(true); }
 });
 
 // ================================================================
@@ -1019,6 +1146,17 @@ const CSS = `
 .sn{font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.5px}
 .s.ev{background:#0d1a12}.s.ev .sv{font-size:15px;color:#00ff87;text-shadow:0 0 10px rgba(0,255,135,.25)}
 
+.deal{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 12px;border-bottom:1px solid #1e2a45;font-family:monospace;font-weight:700;font-size:13px;transition:background .3s}
+.deal-good{background:rgba(0,255,135,.08);color:#00ff87}
+.deal-bad{background:rgba(255,71,87,.08);color:#ff4757}
+.deal-wait{color:#4a5568;font-size:11px;font-weight:400;font-family:inherit}
+.deal-bid{color:#e8ecf4}
+.deal-vs{color:#4a5568;font-size:10px;font-weight:400}
+.deal-ev{color:#7b8ba8}
+.deal-diff{font-size:15px;font-weight:800;letter-spacing:0.5px}
+.deal-good .deal-diff{color:#00ff87;text-shadow:0 0 8px rgba(0,255,135,.3)}
+.deal-bad .deal-diff{color:#ff4757;text-shadow:0 0 8px rgba(255,71,87,.3)}
+
 .tb2{display:flex;gap:6px;align-items:center;padding:6px 12px;border-bottom:1px solid #1e2a45;flex-wrap:wrap}
 .si{flex:1;min-width:80px;padding:4px 8px;background:#161f32;border:1px solid #1e2a45;border-radius:4px;color:#e8ecf4;font-size:12px;outline:none;font-family:inherit}
 .si:focus{border-color:#00ff87}.si::placeholder{color:#4a5568}
@@ -1027,12 +1165,15 @@ const CSS = `
 .fb:hover{border-color:#7b8ba8;color:#7b8ba8}
 .fb.fa{background:rgba(0,255,135,.12);border-color:#00ff87;color:#00ff87}
 
-.lh{display:grid;grid-template-columns:24px 16px 1fr 60px;gap:4px;padding:3px 12px;background:#0f1520;border-bottom:1px solid #1e2a45;font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px}
-.sh{cursor:pointer;transition:color .12s;user-select:none}.sh:hover{color:#00ff87}
+.lh{display:grid;grid-template-columns:16px 1fr 64px 36px 24px;gap:4px;padding:3px 12px;background:#0f1520;border-bottom:1px solid #1e2a45;font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px}
+.lhc{cursor:pointer;user-select:none;display:flex;align-items:center;gap:2px;transition:color .12s}
+.lhc:hover{color:#e8ecf4}
+.sha{font-size:8px;color:#4a5568;transition:color .12s}
+.sha-on{color:#00ff87}
 .lb{flex:1;overflow-y:auto;min-height:0}
 .lb::-webkit-scrollbar{width:4px}.lb::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:2px}
 
-.r{display:grid;grid-template-columns:24px 16px 1fr 60px;gap:4px;padding:4px 12px;border-bottom:1px solid #1e2a45;align-items:center;transition:background .1s}
+.r{display:grid;grid-template-columns:16px 1fr 64px 36px 24px;gap:4px;padding:4px 12px;border-bottom:1px solid #1e2a45;align-items:center;transition:background .1s}
 .r:hover{background:#1c2742}.r.av{background:rgba(0,255,135,.02)}
 .r.sd{background:rgba(255,71,87,.06);opacity:.45}.r.sd .rn{text-decoration:line-through}
 
@@ -1040,7 +1181,8 @@ const CSS = `
 .d.on{background:#00ff87;box-shadow:0 0 5px rgba(0,255,135,.3)}.d.off{background:#ff4757;opacity:.4}
 .rn{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rw,.rp{font-family:monospace;font-size:11px;text-align:right;color:#7b8ba8}.rp{font-weight:700}
-.rp.hot{color:#00ff87;text-shadow:0 0 6px rgba(0,255,135,.2)}.rp.warm{color:#7dffba}.rp.pick{color:#64b4ff;font-weight:800}
+.rp.hot{color:#00ff87;text-shadow:0 0 6px rgba(0,255,135,.2)}.rp.warm{color:#7dffba}
+.rs{font-family:monospace;font-size:10px;text-align:center;color:#ffcc00}
 .tb{width:20px;height:20px;background:none;border:none;color:#4a5568;font-size:14px;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;transition:all .1s}
 .tb:hover{background:#1c2742;color:#00ff87}
 
@@ -1074,7 +1216,7 @@ function discoverBreakId() {
 
 loadDataset();
 createRoot();
-render();
+render(true);
 startObserver();
 startAuto();
 
