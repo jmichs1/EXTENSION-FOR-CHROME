@@ -5,6 +5,8 @@
   if (window.__boNetIntercept) return;
   window.__boNetIntercept = true;
   window.__boQueue = [];
+  var __boGqlUrl = null;
+  var __boGqlHeaders = null;
 
   function post(msg) {
     window.postMessage(msg, '*');
@@ -31,7 +33,10 @@
     var args = arguments;
     var url = (typeof args[0] === 'string') ? args[0] : args[0]?.url || '';
     if (/graphql/i.test(url)) {
-      post({ type: 'BO_GQL_URL', payload: { url: url.split('?')[0] } });
+      __boGqlUrl = url.split('?')[0];
+      post({ type: 'BO_GQL_URL', payload: { url: __boGqlUrl } });
+      // Capture request headers for replaying in active fetches
+      try { if (args[1] && args[1].headers) { var hdr = {}; if (args[1].headers instanceof Headers) { args[1].headers.forEach(function(v,k){hdr[k]=v;}); } else { for (var hk in args[1].headers) hdr[hk]=args[1].headers[hk]; } __boGqlHeaders = hdr; } } catch(e2) {}
       try {
         var body = typeof args[1]?.body === 'string' ? JSON.parse(args[1].body) : null;
         var vid = body?.variables?.id;
@@ -97,6 +102,28 @@
     // On-demand __NEXT_DATA__ scan requested by content script
     if (event.data && event.data.type === 'BO_SCAN_NEXT_DATA') {
       scanNextData();
+    }
+    // Active GraphQL fetch delegated from content script (ISOLATED world)
+    // Runs here in MAIN world to use the same auth context as Whatnot's frontend
+    if (event.data && event.data.type === 'BO_FETCH_BREAK') {
+      var bid = event.data.payload && event.data.payload.breakId;
+      var gql = event.data.payload && event.data.payload.query;
+      if (bid && __boGqlUrl && gql) {
+        var fhdr = {};
+        if (__boGqlHeaders) { for (var fk in __boGqlHeaders) { if (fk.toLowerCase() !== 'content-length') fhdr[fk] = __boGqlHeaders[fk]; } }
+        fhdr['Content-Type'] = 'application/json';
+        origFetch(__boGqlUrl, {
+          method: 'POST', headers: fhdr, credentials: 'include',
+          body: JSON.stringify({ operationName: 'QueryBreak', query: gql, variables: { id: bid, getAllSpotOptions: true, getAllSpots: false, getPaginatedSpots: false, getPaginatedSpotOptions: false } })
+        }).then(function(resp) {
+          if (!resp.ok) { console.log('[BO] MAIN fetch HTTP ' + resp.status); return null; }
+          return resp.json();
+        }).then(function(json) {
+          if (json && json.data && json.data.getBreak) {
+            post({ type: 'BO_API_DATA', payload: { breakData: json.data.getBreak, breakId: bid } });
+          }
+        }).catch(function(e) { console.log('[BO] MAIN fetch error:', e.message); });
+      }
     }
   });
 })();

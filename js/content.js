@@ -826,34 +826,10 @@ function setupApiListener() {
 }
 
 // Actively fetch break spots via GraphQL (no UI interaction needed)
-async function fetchBreakSpots() {
+// Delegates to MAIN world script which has Whatnot's auth context + headers
+function fetchBreakSpots() {
   if (!S._breakId) return;
-  try {
-    const gqlUrl = S._gqlUrl || '/api/graphql';
-    const resp = await fetch(gqlUrl + '?operationName=QueryBreak&ssr=0', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        operationName: 'QueryBreak',
-        query: QUERY_BREAK_GQL,
-        variables: {
-          id: S._breakId,
-          getAllSpotOptions: true,
-          getAllSpots: false,
-          getPaginatedSpots: false,
-          getPaginatedSpotOptions: false,
-        }
-      })
-    });
-    if (!resp.ok) { console.log('[BO] fetchBreakSpots HTTP ' + resp.status + ' — URL: ' + (S._gqlUrl || '/api/graphql')); return; }
-    const json = await resp.json();
-    if (json?.data?.getBreak) {
-      processApiBreakData(json.data.getBreak, S._breakId);
-    }
-  } catch (e) {
-    console.log('[BO] fetchBreakSpots error:', e.message);
-  }
+  window.postMessage({ type: 'BO_FETCH_BREAK', payload: { breakId: S._breakId, query: QUERY_BREAK_GQL } }, '*');
 }
 
 // ================================================================
