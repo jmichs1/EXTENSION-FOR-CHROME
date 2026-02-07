@@ -68,7 +68,23 @@
     return response;
   };
 
-  // Listen for drain request from content script (ISOLATED world)
+  // Scan __NEXT_DATA__ for break IDs (Next.js SSR data)
+  function scanNextData() {
+    try {
+      if (window.__NEXT_DATA__) {
+        findBreakIds(window.__NEXT_DATA__, 0);
+      }
+    } catch (e) {}
+  }
+
+  // Run after DOM loads to catch SSR data
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { setTimeout(scanNextData, 500); });
+  } else {
+    setTimeout(scanNextData, 500);
+  }
+
+  // Listen for messages from content script (ISOLATED world)
   window.addEventListener('message', function(event) {
     if (event.source !== window) return;
     if (event.data && event.data.type === 'BO_DRAIN_QUEUE') {
@@ -76,6 +92,10 @@
         window.postMessage(window.__boQueue[i], '*');
       }
       window.__boQueue = [];
+    }
+    // On-demand __NEXT_DATA__ scan requested by content script
+    if (event.data && event.data.type === 'BO_SCAN_NEXT_DATA') {
+      scanNextData();
     }
   });
 })();

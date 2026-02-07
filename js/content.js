@@ -310,6 +310,8 @@ const S = {
   _saleCommitted: false,   // already added revenue for this auction cycle?
   _lastNetworkScrape: null, // timestamp of last successful API data
   _breakId: null,           // current break ID from intercepted API
+  soldOrder: [],            // [{name, pickNum, price, time}] — draft pick order
+  _pickCounter: 0,          // next pick number
 };
 
 function loadDataset() {
@@ -542,10 +544,14 @@ function applyScrape(d) {
   else if (d.comingUp) S._currentAuctionItem = d.comingUp;
 
   if ((soldJustAppeared || awaitJustAppeared) && !S._saleCommitted) {
-    // Mark the auctioned item as sold
+    // Mark the auctioned item as sold + track pick order
     if (S._currentAuctionItem) {
       S.soldSet.add(S._currentAuctionItem);
-      console.log("[BO] ✅ Sold: " + S._currentAuctionItem + (S.lastPrice ? " for $" + S.lastPrice : ""));
+      if (!S.soldOrder.some(e => e.name === S._currentAuctionItem)) {
+        S._pickCounter++;
+        S.soldOrder.push({ name: S._currentAuctionItem, pickNum: S._pickCounter, price: S.lastPrice || null, time: Date.now() });
+      }
+      console.log("[BO] ✅ Pick #" + S._pickCounter + ": " + S._currentAuctionItem + (S.lastPrice ? " for $" + S.lastPrice : ""));
     }
     if (S.lastPrice) {
       S.revenue += S.lastPrice;
@@ -567,9 +573,21 @@ function applyScrape(d) {
 
   // --- SOLD/AVAILABLE NAME PROCESSING (source-aware) ---
   if (d._source === 'api') {
-    // API data is authoritative — rebuild soldSet from scratch
-    S.soldSet.clear();
-    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) S.soldSet.add(m); }
+    // API data is authoritative — rebuild soldSet and reconcile soldOrder
+    const apiSold = new Set();
+    for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) apiSold.add(m); }
+    // Add newly sold items to soldOrder (items in API but not yet tracked)
+    for (const name of apiSold) {
+      if (!S.soldOrder.some(e => e.name === name)) {
+        S._pickCounter++;
+        S.soldOrder.push({ name, pickNum: S._pickCounter, price: null, time: Date.now() });
+      }
+    }
+    // Remove items that API says are actually available (error corrections)
+    S.soldOrder = S.soldOrder.filter(e => apiSold.has(e.name));
+    S.soldOrder.forEach((e, i) => { e.pickNum = i + 1; });
+    S._pickCounter = S.soldOrder.length;
+    S.soldSet = apiSold;
   } else if (!S._lastNetworkScrape || Date.now() - S._lastNetworkScrape > 60000) {
     // DOM scraper fallback: only process if no fresh API data (>60s stale)
     for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) S.soldSet.add(m); }
@@ -585,7 +603,7 @@ function applyScrape(d) {
 }
 
 // ================================================================
-// NETWORK API INTERCEPTION — replaces silentScrape "See Spots" click
+// NETWORK API INTERCEPTION — primary data source (API + stream screen)
 // ================================================================
 
 // GraphQL query for fetching all break spots (simplified from Whatnot's own query)
@@ -856,8 +874,9 @@ function render() {
   let rows = "";
   for (const it of items) {
     const cls = it.available ? "av" : "sd";
-    const valStr = it.available ? "$" + it.dollarVal.toFixed(0) : "—";
-    const valCls = it.dollarVal > 500 ? "hot" : it.dollarVal > 50 ? "warm" : "";
+    const pick = !it.available ? S.soldOrder.find(e => e.name === it.name) : null;
+    const valStr = it.available ? "$" + it.dollarVal.toFixed(0) : (pick ? `#${pick.pickNum}` : "SOLD");
+    const valCls = it.available ? (it.dollarVal > 500 ? "hot" : it.dollarVal > 50 ? "warm" : "") : (pick ? "pick" : "");
     rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><button class="tb">${it.available?"−":"+"}</button><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span></div>`;
   }
   const fBtn = (f,l) => `<button class="fb${S.filter===f?" fa":""}" data-f="${f}">${l}</button>`;
@@ -897,15 +916,16 @@ function render() {
   bo.querySelectorAll(".sh").forEach(h => h.onclick = () => { const col = h.dataset.s; S.sort = S.sort === col + "-desc" ? col + "-asc" : col + "-desc"; render(); });
   bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render();} });
   bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(); };
-  bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.items.forEach(i=>i.available=true); render(); };
+  bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.soldOrder=[]; S._pickCounter=0; S.items.forEach(i=>i.available=true); render(); };
   bo.querySelector("#clB").onclick = () => { S.items.forEach(i=>{i.available=false;S.soldSet.add(i.name);}); render(); };
-  bo.querySelector("#syncB").onclick = () => { S.soldSet.clear(); S.items.forEach(i=>i.available=true); doScrape(); };
-  bo.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available)S.soldSet.delete(nm);else S.soldSet.add(nm); render(); }; });
+  bo.querySelector("#syncB").onclick = () => { S.soldSet.clear(); S.soldOrder=[]; S._pickCounter=0; S.items.forEach(i=>i.available=true); doScrape(); };
+  bo.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available){S.soldSet.delete(nm);S.soldOrder=S.soldOrder.filter(e=>e.name!==nm);S.soldOrder.forEach((e,i)=>{e.pickNum=i+1});S._pickCounter=S.soldOrder.length;}else{S.soldSet.add(nm);S._pickCounter++;S.soldOrder.push({name:nm,pickNum:S._pickCounter,price:null,time:Date.now()});} render(); }; });
 
   if (S.search) { const sb=bo.querySelector("#srch"); sb.focus(); sb.setSelectionRange(S.search.length,S.search.length); }
 }
 
 function doScrape() {
+  if (!S._breakId) discoverBreakId();
   try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| sold?:",!!d.hasSold,"| $:",d.auctionPrice,"| name:",d.auctionName||"-","| coming:",d.comingUp||"-","| avail:",d.availNames.length,"| sold:",d.soldNames.length,"| soldSet:",S.soldSet.size); applyScrape(d); const active=shadow.activeElement; if(active&&(active.tagName==='SELECT'||active.tagName==='INPUT')) return; render(); } catch(e){console.error("[BO] err:",e);}
 }
 
@@ -1020,7 +1040,7 @@ const CSS = `
 .d.on{background:#00ff87;box-shadow:0 0 5px rgba(0,255,135,.3)}.d.off{background:#ff4757;opacity:.4}
 .rn{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rw,.rp{font-family:monospace;font-size:11px;text-align:right;color:#7b8ba8}.rp{font-weight:700}
-.rp.hot{color:#00ff87;text-shadow:0 0 6px rgba(0,255,135,.2)}.rp.warm{color:#7dffba}
+.rp.hot{color:#00ff87;text-shadow:0 0 6px rgba(0,255,135,.2)}.rp.warm{color:#7dffba}.rp.pick{color:#64b4ff;font-weight:800}
 .tb{width:20px;height:20px;background:none;border:none;color:#4a5568;font-size:14px;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;transition:all .1s}
 .tb:hover{background:#1c2742;color:#00ff87}
 
@@ -1033,181 +1053,23 @@ const CSS = `
 // ================================================================
 // INIT
 // ================================================================
-// Periodic silent scrape: open See Spots invisibly, scrape, close
-let _silentScrapeRunning = false;
-let _silentHideStyle = null;
-
-function silentScrape() {
-  if (_silentScrapeRunning) return;
-  // Skip if we have fresh API data (network interception working)
-  if (S._lastNetworkScrape && (Date.now() - S._lastNetworkScrape) < 60000) {
-    console.log('[BO] silentScrape: skipped (fresh API data available)');
-    return;
+// Discover break ID from page DOM elements (no UI interaction)
+function discoverBreakId() {
+  if (S._breakId) return;
+  // Look for links/buttons with break-related URLs
+  const links = document.querySelectorAll('a[href*="break"], a[href*="Break"]');
+  for (const a of links) {
+    const m = a.href.match(/break[/_](\d+)/i);
+    if (m) { S._breakId = m[1]; console.log('[BO] Break ID from DOM link:', S._breakId); fetchBreakSpots(); return; }
   }
-
-  // Find "See Spots" button — only matches when the panel is NOT already open
-  let seeBtn = null;
-  const btns = document.querySelectorAll('button, [role="button"]');
-  for (const b of btns) {
-    const t = b.textContent.trim();
-    if (/^see\s+spots?$/i.test(t) && b.offsetWidth > 0) { seeBtn = b; break; }
+  // Look for data attributes
+  const els = document.querySelectorAll('[data-break-id], [data-breakid]');
+  for (const el of els) {
+    const id = el.getAttribute('data-break-id') || el.getAttribute('data-breakid');
+    if (id && /^\d+$/.test(id)) { S._breakId = id; console.log('[BO] Break ID from data attr:', S._breakId); fetchBreakSpots(); return; }
   }
-  if (!seeBtn) {
-    console.log("[BO] silentScrape: no 'See Spots' button found (panel may be open already or not on break page)");
-    return;
-  }
-
-  _silentScrapeRunning = true;
-  console.log("[BO] silentScrape: starting...");
-
-  // STEP 1: Inject a global CSS rule to hide any new overlays/panels BEFORE clicking
-  // This prevents the visual flash. We target common panel patterns on Whatnot.
-  _silentHideStyle = document.createElement('style');
-  _silentHideStyle.id = '__bo_silent_hide';
-  _silentHideStyle.textContent = `
-    .__bo_hidden_panel { opacity: 0 !important; pointer-events: none !important; position: fixed !important; }
-  `;
-  document.head.appendChild(_silentHideStyle);
-
-  // STEP 2: Click "See Spots"
-  seeBtn.click();
-  console.log("[BO] silentScrape: clicked See Spots");
-
-  // STEP 3: Wait for panel to render, then find and hide it
-  setTimeout(() => {
-    // Find the spots panel — look for a fixed/absolute container that has "Available Spots" or "Sold Spots"
-    let spotsPanel = null;
-    const walker1 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let nd1;
-    while ((nd1 = walker1.nextNode())) {
-      const txt = nd1.textContent.trim();
-      if (/^(Available|Sold)\s+Spots?\s*\(\d+\)/i.test(txt)) {
-        // Walk up to find the outermost fixed/absolute panel
-        let p = nd1.parentElement;
-        let candidate = null;
-        while (p && p !== document.body) {
-          const st = window.getComputedStyle(p);
-          if (st.position === 'fixed' || st.position === 'absolute') {
-            candidate = p; // keep going up to find the outermost one
-          }
-          p = p.parentElement;
-        }
-        if (candidate) { spotsPanel = candidate; break; }
-      }
-    }
-
-    if (spotsPanel) {
-      spotsPanel.classList.add('__bo_hidden_panel');
-      console.log("[BO] silentScrape: found & hid spots panel");
-    } else {
-      console.log("[BO] silentScrape: WARNING - couldn't find spots panel container");
-    }
-
-    // STEP 4: Expand "Sold Spots" section by clicking it
-    // Try multiple strategies: click the text, its parent, look for expandable elements
-    let expandedSold = false;
-    const walker2 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let nd2;
-    while ((nd2 = walker2.nextNode())) {
-      if (/^Sold\s+Spots?\s*\(\d+\)/i.test(nd2.textContent.trim())) {
-        // Strategy 1: Walk up looking for clickable ancestor
-        let target = nd2.parentElement;
-        for (let i = 0; i < 8 && target && target !== document.body; i++) {
-          const tag = target.tagName;
-          const role = target.getAttribute('role') || '';
-          const cursor = window.getComputedStyle(target).cursor;
-          if (tag === 'BUTTON' || role === 'button' || cursor === 'pointer' || target.onclick) {
-            target.click();
-            expandedSold = true;
-            console.log("[BO] silentScrape: clicked Sold Spots header (depth " + i + ")");
-            break;
-          }
-          target = target.parentElement;
-        }
-        // Strategy 2: If no clickable ancestor found, just click the text element and its immediate parents
-        if (!expandedSold) {
-          const el = nd2.parentElement;
-          if (el) { el.click(); console.log("[BO] silentScrape: clicked Sold Spots text parent directly"); }
-          if (el?.parentElement) { el.parentElement.click(); }
-          expandedSold = true;
-        }
-        break;
-      }
-    }
-    if (!expandedSold) console.log("[BO] silentScrape: WARNING - couldn't find Sold Spots header to expand");
-
-    // STEP 5: Wait for sold items to render, then scrape
-    setTimeout(() => {
-      doScrape();
-      console.log("[BO] silentScrape: scraped. soldSet size:", S.soldSet.size, "items:", [...S.soldSet].join(", "));
-
-      // STEP 6: Close the panel
-      _silentClose(spotsPanel);
-
-      _silentScrapeRunning = false;
-    }, 1500);
-  }, 1200);
-}
-
-function _silentClose(spotsPanel) {
-  // Strategy 1: Find close/X button within or near the panel
-  const searchRoot = spotsPanel || document.body;
-  const closeCandidates = searchRoot.querySelectorAll('button, [role="button"], svg');
-  let closed = false;
-  for (const b of closeCandidates) {
-    const t = b.textContent.trim();
-    const label = b.getAttribute('aria-label') || '';
-    // Match: × ✕ ✖ X close, or SVG close icons, or aria-label="close"
-    if (/^[×✕✖xX]$/.test(t) || /close/i.test(label) || /close/i.test(t)) {
-      if (typeof b.click === 'function') b.click(); else b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      closed = true;
-      console.log("[BO] silentScrape: closed panel via close button");
-      break;
-    }
-  }
-
-  // Strategy 2: If no close button found in panel, search globally
-  if (!closed) {
-    const allBtns = document.querySelectorAll('button, [role="button"]');
-    for (const b of allBtns) {
-      const t = b.textContent.trim();
-      const label = b.getAttribute('aria-label') || '';
-      if (/^[×✕✖]$/.test(t) || /^close$/i.test(label)) {
-        b.click();
-        closed = true;
-        console.log("[BO] silentScrape: closed panel via global close button");
-        break;
-      }
-    }
-  }
-
-  // Strategy 3: Click backdrop/overlay if present
-  if (!closed) {
-    const overlays = document.querySelectorAll('[class*="overlay"], [class*="backdrop"], [class*="modal-bg"]');
-    for (const ov of overlays) {
-      if (ov !== spotsPanel && ov.offsetWidth > 0) {
-        ov.click();
-        closed = true;
-        console.log("[BO] silentScrape: closed panel via backdrop click");
-        break;
-      }
-    }
-  }
-
-  // Strategy 4: Press Escape key
-  if (!closed) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    console.log("[BO] silentScrape: dispatched Escape key to close panel");
-  }
-
-  // Clean up: remove hidden class and style
-  if (spotsPanel) {
-    spotsPanel.classList.remove('__bo_hidden_panel');
-  }
-  if (_silentHideStyle) {
-    _silentHideStyle.remove();
-    _silentHideStyle = null;
-  }
+  // Ask MAIN world to scan __NEXT_DATA__
+  window.postMessage({ type: 'BO_SCAN_NEXT_DATA' }, '*');
 }
 
 loadDataset();
@@ -1220,25 +1082,26 @@ startAuto();
 // intercept-main.js runs in MAIN world via manifest, so just set up the listener
 setupApiListener();
 
-// Give interceptor 3s to discover break ID from __NEXT_DATA__ or GraphQL calls, then fetch
+// Give interceptor time to discover break ID from GraphQL calls
 setTimeout(() => {
   if (S._breakId) {
     fetchBreakSpots();
   } else {
-    // Last resort: one silentScrape to trigger a QueryBreak call and discover break ID
-    console.log('[BO] No break ID after 3s, falling back to silentScrape');
-    silentScrape();
+    console.log('[BO] No break ID after 3s, trying DOM + __NEXT_DATA__ discovery');
+    discoverBreakId();
   }
 }, 3000);
 
-// Periodic refresh: active API fetch every 30s, silentScrape fallback if no breakId
+// Retry break ID discovery every 5s until found
+const _discoverInterval = setInterval(() => {
+  if (S._breakId) { clearInterval(_discoverInterval); return; }
+  discoverBreakId();
+}, 5000);
+
+// Periodic API refresh every 15s when break ID is known
 setInterval(() => {
-  if (S._breakId) {
-    fetchBreakSpots();
-  } else if (!_silentScrapeRunning && (!S._lastNetworkScrape || Date.now() - S._lastNetworkScrape > 60000)) {
-    silentScrape();
-  }
-}, 30000);
+  if (S._breakId) fetchBreakSpots();
+}, 15000);
 console.log("[Break Odds v4] Overlay loaded.");
 
 })();
