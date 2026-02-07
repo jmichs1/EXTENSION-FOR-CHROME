@@ -719,10 +719,14 @@ function applyScrape(d) {
   }
 
   // === SET ITEM STATUS ===
+  // When we have an authoritative available list (API data or DOM "Available Spots"),
+  // teams not in either set should default to SOLD (the available list is exhaustive).
+  // Without any data, default to available so we don't show everything as sold erroneously.
+  const hasAuthoritativeData = S._hasApiData || S.availSet.size > 0;
   for (const it of S.items) {
     if (S.soldSet.has(it.name)) { it.available = false; }
     else if (S.availSet.has(it.name)) { it.available = true; }
-    else { it.available = true; }
+    else { it.available = !hasAuthoritativeData; }
   }
 
   // === ASSIGN PICK NUMBERS ===
