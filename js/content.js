@@ -373,7 +373,9 @@ function buildNameMap() {
   return m;
 }
 function matchName(raw, nmap) {
-  const n = norm(raw); if (n.length < 3) return null;
+  // Strip parenthetical suffixes: (SS), (INF), (AUTO x3), etc.
+  const stripped = raw.replace(/\s*\([^)]*\)/g, '').trim();
+  const n = norm(stripped.length >= 3 ? stripped : raw); if (n.length < 3) return null;
   if (nmap.has(n)) return nmap.get(n);
   for (const [k, v] of nmap) { if (k.length >= 5 && (n.includes(k) || k.includes(n))) return v; }
   return null;
@@ -569,6 +571,29 @@ function scrape() {
   // CSS class sold detection
   const soldEls = document.querySelectorAll('[class*="sold" i],[data-sold],[aria-label*="sold" i]');
   for (const el of soldEls) { const t=el.textContent.trim(); if (t.length>2&&t.length<80) { const c=t.replace(/sold/gi,"").trim(); if (c.length>=3&&isNameCandidate(c)) r.soldNames.push(c); } }
+
+  // "Coming Up" items = available spots (player break modal format)
+  // Each "Coming Up" element has a sibling/nearby element with the player name
+  if (r.availNames.length === 0) {
+    const nmap = buildNameMap();
+    for (const {t, el} of texts) {
+      if (!/^Coming\s*Up$/i.test(t)) continue;
+      // Walk up to the row container and look for a player name
+      let found = false;
+      let container = el.parentElement;
+      for (let depth = 0; depth < 4 && container && !found; depth++) {
+        const kids = container.querySelectorAll('*');
+        for (const kid of kids) {
+          if (kid.children.length > 0) continue; // leaf nodes only
+          const kt = kid.textContent.trim();
+          if (kt === t || kt.length < 3 || kt.length > 100) continue;
+          const matched = matchName(kt, nmap);
+          if (matched) { if (!r.availNames.includes(matched)) r.availNames.push(matched); found = true; break; }
+        }
+        container = container.parentElement;
+      }
+    }
+  }
 
   return r;
 }
@@ -1044,19 +1069,8 @@ function render(force) {
 
   let items = [...S.items];
 
-  // Sort (v14 approach: pure column sort, no avail/sold separation)
-  const dir = S.sort.endsWith("-asc") ? 1 : -1;
-  const col = S.sort.replace(/-asc$|-desc$/, "");
-  switch (col) {
-    case "name": items.sort((a, b) => dir * a.name.localeCompare(b.name)); break;
-    case "value": items.sort((a, b) => dir * (a.dollarVal - b.dollarVal)); break;
-    case "pick": items.sort((a, b) => {
-      const ap = a.spotNum || 0, bp = b.spotNum || 0;
-      if (ap && !bp) return -1; if (!ap && bp) return 1;
-      if (!ap && !bp) return a.name.localeCompare(b.name);
-      return dir * (ap - bp);
-    }); break;
-  }
+  // Sort by value descending (highest value first)
+  items.sort((a, b) => b.dollarVal - a.dollarVal);
 
   if (S.filter === "available") items = items.filter(i => i.available);
   else if (S.filter === "sold") items = items.filter(i => !i.available);
@@ -1068,15 +1082,9 @@ function render(force) {
     const cls = it.available ? "av" : "sd";
     const valStr = "$" + (it.dollarVal >= 1000 ? it.dollarVal.toLocaleString(undefined,{maximumFractionDigits:0}) : it.dollarVal.toFixed(0));
     const valCls = it.dollarVal > 500 ? "hot" : it.dollarVal > 100 ? "warm" : "";
-    const pickStr = it.spotNum > 0 ? `#${it.spotNum}` : "";
-    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span><span class="rs">${pickStr}</span><button class="tb">${it.available?"\u2212":"+"}</button></div>`;
+    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span><button class="tb">${it.available?"\u2212":"+"}</button></div>`;
   }
   const fBtn = (f,l) => `<button class="fb${S.filter===f?" fa":""}" data-f="${f}">${l}</button>`;
-  const sortArrow = (c) => {
-    const isActive = col === c;
-    const arrow = isActive ? (dir === 1 ? "\u25B2" : "\u25BC") : "\u25BD";
-    return `<span class="sha${isActive?" sha-on":""}" data-col="${c}">${arrow}</span>`;
-  };
   const prodOpts = PRODUCTS.map(p=>`<option value="${p.id}"${S.productId===p.id?" selected":""}>${p.name}</option>`).join("");
   const qtyOpts = Array.from({length:10},(_,i)=>`<option value="${i+1}"${S.qty===(i+1)?" selected":""}>${i+1}</option>`).join("");
   const product = PRODUCTS.find(p=>p.id===S.productId)||PRODUCTS[0];
@@ -1098,7 +1106,7 @@ function render(force) {
       return `<div class="deal ${cls2}"><span class="deal-bid">BID: $${S.currentBid}</span><span class="deal-vs">vs</span><span class="deal-ev">EV: $${ev.toFixed(0)}</span><span class="deal-diff">${icon} ${diffStr}</span></div>`;
     })() : '<div class="deal deal-wait">Waiting for bid...</div>'}
     <div class="tb2"><input type="text" id="srch" class="si" placeholder="Search..." value="${S.search||""}"><div class="fr">${fBtn("all","All")}${fBtn("available","Avail")}${fBtn("sold","Sold")}${fBtn("high","High$")}</div></div>
-    <div class="lh"><span></span><span class="lhc" data-col="name">Name ${sortArrow("name")}</span><span class="lhc" data-col="value">Value ${sortArrow("value")}</span><span class="lhc" data-col="pick">Pick ${sortArrow("pick")}</span><span></span></div>
+    <div class="lh"><span></span><span>NAME</span><span>VALUE</span><span></span></div>
     <div id="lb" class="lb">${rows}</div>
     <div class="ft"><button id="syncB" class="ftb accent">\u27F3 Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
     <div class="rz rz-n" data-e="n"></div><div class="rz rz-s" data-e="s"></div><div class="rz rz-e" data-e="e"></div><div class="rz rz-w" data-e="w"></div>
@@ -1115,13 +1123,6 @@ function render(force) {
 
   bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S._manualLeague=true;S.soldSet.clear();S.availSet.clear();S.spotOrder=[];loadDataset();doScrape();} });
   bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S._manualSubmode=true;S.soldSet.clear();S.availSet.clear();S.spotOrder=[];loadDataset();doScrape();} });
-  // Column header sort
-  bo.querySelectorAll(".lhc").forEach(h => h.onclick = () => {
-    const c = h.dataset.col;
-    if (col === c) { S.sort = c + (dir === -1 ? "-asc" : "-desc"); }
-    else { S.sort = c + "-desc"; }
-    render(true);
-  });
   bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render(true);} });
   bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(true); };
   bo.querySelector("#rsB").onclick = () => { S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); render(true); };
@@ -1251,15 +1252,11 @@ const CSS = `
 .fb:hover{border-color:#7b8ba8;color:#7b8ba8}
 .fb.fa{background:rgba(0,255,135,.12);border-color:#00ff87;color:#00ff87}
 
-.lh{display:grid;grid-template-columns:16px 1fr 64px 36px 24px;gap:4px;padding:3px 12px;background:#0f1520;border-bottom:1px solid #1e2a45;font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px}
-.lhc{cursor:pointer;user-select:none;display:flex;align-items:center;gap:2px;transition:color .12s}
-.lhc:hover{color:#e8ecf4}
-.sha{font-size:8px;color:#4a5568;transition:color .12s}
-.sha-on{color:#00ff87}
+.lh{display:grid;grid-template-columns:16px 1fr 64px 24px;gap:4px;padding:3px 12px;background:#0f1520;border-bottom:1px solid #1e2a45;font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px}
 .lb{flex:1;overflow-y:auto;min-height:0}
 .lb::-webkit-scrollbar{width:4px}.lb::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:2px}
 
-.r{display:grid;grid-template-columns:16px 1fr 64px 36px 24px;gap:4px;padding:4px 12px;border-bottom:1px solid #1e2a45;align-items:center;transition:background .1s}
+.r{display:grid;grid-template-columns:16px 1fr 64px 24px;gap:4px;padding:4px 12px;border-bottom:1px solid #1e2a45;align-items:center;transition:background .1s}
 .r:hover{background:#1c2742}.r.av{background:rgba(0,255,135,.02)}
 .r.sd{background:rgba(255,71,87,.06);opacity:.45}.r.sd .rn{text-decoration:line-through}
 
@@ -1268,7 +1265,6 @@ const CSS = `
 .rn{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rw,.rp{font-family:monospace;font-size:11px;text-align:right;color:#7b8ba8}.rp{font-weight:700}
 .rp.hot{color:#00ff87;text-shadow:0 0 6px rgba(0,255,135,.2)}.rp.warm{color:#7dffba}
-.rs{font-family:monospace;font-size:10px;text-align:center;color:#ffcc00}
 .tb{width:20px;height:20px;background:none;border:none;color:#4a5568;font-size:14px;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;transition:all .1s}
 .tb:hover{background:#1c2742;color:#00ff87}
 
