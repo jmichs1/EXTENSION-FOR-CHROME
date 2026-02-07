@@ -13,6 +13,35 @@
     window.__boQueue.push(msg);
   }
 
+  // Deep scan for arrays that look like spot options (have title + available fields)
+  function findSpotOptions(obj, depth) {
+    if (!obj || typeof obj !== 'object' || depth > 6) return null;
+    if (Array.isArray(obj)) {
+      if (obj.length > 2 && obj[0] && typeof obj[0].title === 'string' && typeof obj[0].available === 'boolean') {
+        return obj;
+      }
+      for (var i = 0; i < obj.length; i++) {
+        var found = findSpotOptions(obj[i], depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    // Check paginated edges pattern: { edges: [{ node: {title, available} }] }
+    if (obj.edges && Array.isArray(obj.edges) && obj.edges.length > 2) {
+      var nodes = obj.edges.map(function(e) { return e.node; }).filter(Boolean);
+      if (nodes.length > 2 && nodes[0].title && typeof nodes[0].available === 'boolean') {
+        return nodes;
+      }
+    }
+    for (var k in obj) {
+      if (obj.hasOwnProperty(k)) {
+        var found = findSpotOptions(obj[k], depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
   function findBreakIds(obj, depth) {
     if (!obj || typeof obj !== 'object' || depth > 10) return;
     if (Array.isArray(obj)) { for (var i = 0; i < obj.length; i++) findBreakIds(obj[i], depth + 1); return; }
@@ -58,11 +87,33 @@
           var breakId = null;
           try {
             var body2 = typeof args[1]?.body === 'string' ? JSON.parse(args[1].body) : null;
-            breakId = body2?.variables?.id || null;
+            breakId = body2?.variables?.id || body2?.variables?.breakId || null;
+            var opName = body2?.operationName || '';
+            console.log('[BO] GQL response: op=' + opName + ' keys=' + (json?.data ? Object.keys(json.data).join(',') : 'none'));
           } catch (e) {}
           if (json?.data?.getBreak) {
             breakId = breakId || json.data.getBreak.id;
-            post({ type: 'BO_API_DATA', payload: { breakData: json.data.getBreak, breakId: breakId } });
+            // If getBreak has no spotOptions, try to find them elsewhere in the response
+            var breakData = json.data.getBreak;
+            if (!breakData.spotOptions && !breakData.paginatedSpotOptions) {
+              var foundSpots = findSpotOptions(json.data, 0);
+              if (foundSpots && foundSpots.length > 2) {
+                console.log('[BO] Found ' + foundSpots.length + ' spot options via deep scan');
+                breakData = Object.assign({}, breakData, { spotOptions: foundSpots });
+              }
+            }
+            post({ type: 'BO_API_DATA', payload: { breakData: breakData, breakId: breakId } });
+          }
+          // Also check for spot options data without getBreak (separate spot queries)
+          if (!json?.data?.getBreak) {
+            var spots = findSpotOptions(json?.data, 0);
+            if (spots && spots.length > 2) {
+              // Build a synthetic breakData from the spot options
+              var synBreak = { spotOptions: spots, totalBreakSpots: spots.length };
+              if (breakId) synBreak.id = breakId;
+              console.log('[BO] Synthetic break from spot options: ' + spots.length + ' spots, breakId=' + breakId);
+              post({ type: 'BO_API_DATA', payload: { breakData: synBreak, breakId: breakId } });
+            }
           }
           if (breakId && /^\d+$/.test(String(breakId))) {
             post({ type: 'BO_BREAK_ID', payload: { breakId: String(breakId) } });

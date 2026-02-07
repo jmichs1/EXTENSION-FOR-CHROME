@@ -725,32 +725,6 @@ function applyScrape(d) {
     else { it.available = true; }
   }
 
-  // === COUNTER RECONCILIATION — only when no API data ===
-  // When API data exists, it already tells us exactly which teams are sold.
-  // Counter reconciliation guesses cheapest teams which is wrong — skip it.
-  if (!S._hasApiData) {
-    const expectedSold = (S.spotsLeft !== null && S.totalSpots > 0) ? S.totalSpots - S.spotsLeft : null;
-    if (expectedSold !== null) {
-      const confirmedSold = S.items.filter(i => !i.available).length;
-      if (confirmedSold < expectedSold) {
-        const allocMap = getAllocMap(S.productId, S.league, S.submode);
-        const totalPlayers = S.items.length;
-        const unconfirmed = S.items.filter(i => i.available && !S.availSet.has(i.name));
-        unconfirmed.sort((a, b) => {
-          const allocA = allocMap?.[a.name] || (1 / totalPlayers);
-          const allocB = allocMap?.[b.name] || (1 / totalPlayers);
-          return allocA - allocB;
-        });
-        let needed = expectedSold - confirmedSold;
-        for (const it of unconfirmed) {
-          if (needed <= 0) break;
-          it.available = false;
-          needed--;
-        }
-      }
-    }
-  }
-
   // === ASSIGN PICK NUMBERS ===
   for (const it of S.items) {
     it.spotNum = S.spotOrder.indexOf(it.name) >= 0 ? S.spotOrder.indexOf(it.name) + 1 : 0;
