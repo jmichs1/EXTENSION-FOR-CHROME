@@ -697,31 +697,23 @@ function applyScrape(d) {
     S.soldSet = apiSold;
     S.availSet = apiAvail;
   } else {
-    // DOM-based tracking
+    // DOM-based tracking — ADDITIVE ONLY to prevent flickering
+    // Names only get added to sets, never removed. Only API/resync/manual can flip status.
     if (!S._hasApiData) {
-      // No API data yet — DOM is our only source, use full tracking
-      if (d.currentSoldName) {
-        const soldPlayer = matchName(d.currentSoldName, nmap);
-        if (soldPlayer) {
-          S.availSet.delete(soldPlayer);
-          if (!S.soldSet.has(soldPlayer)) {
-            S.soldSet.add(soldPlayer);
-            if (!S.spotOrder.includes(soldPlayer)) S.spotOrder.push(soldPlayer);
-            console.log("[BO] Sold: " + soldPlayer);
-          }
-        }
-      }
       for (const raw of d.soldNames) {
         const m = matchName(raw, nmap);
-        if (m) { S.availSet.delete(m); if (!S.soldSet.has(m)) { S.soldSet.add(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
+        if (m && !S.availSet.has(m) && !S.soldSet.has(m)) {
+          S.soldSet.add(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m);
+        }
       }
       for (const raw of d.availNames) {
         const m = matchName(raw, nmap);
-        if (m) { S.availSet.add(m); S.soldSet.delete(m); const idx = S.spotOrder.indexOf(m); if (idx >= 0) S.spotOrder.splice(idx, 1); }
+        if (m && !S.soldSet.has(m) && !S.availSet.has(m)) {
+          S.availSet.add(m);
+        }
       }
     }
-    // Always process live auction detection (dash-pattern catches real-time sales)
-    // This only ADDS to soldSet, never removes — safe even with API data
+    // Live auction detection — high confidence, CAN move from avail to sold
     if (d.currentSoldName) {
       const soldPlayer = matchName(d.currentSoldName, nmap);
       if (soldPlayer && !S.soldSet.has(soldPlayer)) {
