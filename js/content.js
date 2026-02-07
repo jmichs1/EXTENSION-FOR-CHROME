@@ -619,28 +619,42 @@ function applyScrape(d) {
     S.soldSet = apiSold;
     S.availSet = apiAvail;
   } else {
-    // DOM-based dual tracking
-    // Mark current sold player from auction title dash pattern
-    if (d.currentSoldName) {
-      const soldPlayer = matchName(d.currentSoldName, nmap);
-      if (soldPlayer) {
-        S.availSet.delete(soldPlayer);
-        if (!S.soldSet.has(soldPlayer)) {
-          S.soldSet.add(soldPlayer);
-          if (!S.spotOrder.includes(soldPlayer)) S.spotOrder.push(soldPlayer);
-          console.log("[BO] Sold: " + soldPlayer);
+    // DOM-based dual tracking — ONLY when API data is stale (>30s old)
+    // When API data is fresh, it's authoritative — don't let DOM scraping override it
+    const apiFresh = S._lastNetworkScrape && (Date.now() - S._lastNetworkScrape < 30000);
+    if (!apiFresh) {
+      // Mark current sold player from auction title dash pattern
+      if (d.currentSoldName) {
+        const soldPlayer = matchName(d.currentSoldName, nmap);
+        if (soldPlayer) {
+          S.availSet.delete(soldPlayer);
+          if (!S.soldSet.has(soldPlayer)) {
+            S.soldSet.add(soldPlayer);
+            if (!S.spotOrder.includes(soldPlayer)) S.spotOrder.push(soldPlayer);
+            console.log("[BO] Sold: " + soldPlayer);
+          }
         }
       }
+      // Accumulate confirmed sold names from DOM
+      for (const raw of d.soldNames) {
+        const m = matchName(raw, nmap);
+        if (m) { S.availSet.delete(m); if (!S.soldSet.has(m)) { S.soldSet.add(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
+      }
+      // Accumulate confirmed available names from DOM
+      for (const raw of d.availNames) {
+        const m = matchName(raw, nmap);
+        if (m) { S.availSet.add(m); S.soldSet.delete(m); const idx = S.spotOrder.indexOf(m); if (idx >= 0) S.spotOrder.splice(idx, 1); }
+      }
     }
-    // Accumulate confirmed sold names from DOM
-    for (const raw of d.soldNames) {
-      const m = matchName(raw, nmap);
-      if (m) { S.availSet.delete(m); if (!S.soldSet.has(m)) { S.soldSet.add(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
-    }
-    // Accumulate confirmed available names from DOM
-    for (const raw of d.availNames) {
-      const m = matchName(raw, nmap);
-      if (m) { S.availSet.add(m); S.soldSet.delete(m); const idx = S.spotOrder.indexOf(m); if (idx >= 0) S.spotOrder.splice(idx, 1); }
+    // Always process auction-state sold detection (revenue state machine already handled above)
+    // even when API is fresh — the dash-pattern can catch real-time sales faster than API polling
+    if (apiFresh && d.currentSoldName) {
+      const soldPlayer = matchName(d.currentSoldName, nmap);
+      if (soldPlayer && !S.soldSet.has(soldPlayer)) {
+        S.soldSet.add(soldPlayer); S.availSet.delete(soldPlayer);
+        if (!S.spotOrder.includes(soldPlayer)) S.spotOrder.push(soldPlayer);
+        console.log("[BO] Sold (live): " + soldPlayer);
+      }
     }
   }
 
@@ -753,10 +767,13 @@ function handleApiMessage(data) {
   }
   if (data.type === 'BO_BREAK_ID') {
     const { breakId } = data.payload || {};
-    if (breakId && !S._breakId) {
+    if (breakId) {
+      const isNew = !S._breakId || S._breakId !== breakId;
       S._breakId = breakId;
-      console.log('[BO] Break ID discovered:', breakId);
-      fetchBreakSpots();
+      if (isNew) {
+        console.log('[BO] Break ID discovered:', breakId);
+        fetchBreakSpots();
+      }
     }
   }
 }
@@ -1053,7 +1070,7 @@ function render(force) {
 
 function doScrape() {
   if (!S._breakId) discoverBreakId();
-  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| soldSet:",S.soldSet.size,"| availSet:",S.availSet.size,"| bid:$"+d.currentBid); applyScrape(d); render(); } catch(e){console.error("[BO] err:",e);}
+  try { const d=scrape(); const apiAge=S._lastNetworkScrape?Math.round((Date.now()-S._lastNetworkScrape)/1000)+"s":"none"; console.log("[BO] spots:",S.spotsLeft,"| soldSet:",S.soldSet.size,"| availSet:",S.availSet.size,"| bid:$"+d.currentBid,"| api:",apiAge,"| breakId:",S._breakId||"none"); applyScrape(d); render(); } catch(e){console.error("[BO] err:",e);}
 }
 
 
@@ -1240,10 +1257,10 @@ const _discoverInterval = setInterval(() => {
   discoverBreakId();
 }, 5000);
 
-// Periodic API refresh every 15s when break ID is known
+// Periodic API refresh every 5s when break ID is known
 setInterval(() => {
   if (S._breakId) fetchBreakSpots();
-}, 15000);
+}, 5000);
 console.log("[Break Odds v4] Overlay loaded.");
 
 })();
