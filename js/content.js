@@ -310,6 +310,7 @@ const S = {
   _saleCommitted: false,   // already added revenue for this auction cycle?
   _lastNetworkScrape: null, // timestamp of last successful API data
   _breakId: null,           // current break ID from intercepted API
+  _gqlUrl: null,            // captured GraphQL endpoint URL from interceptor
   spotOrder: [],            // string[] — names in pick order
   currentBid: null,         // current auction bid price
 };
@@ -351,7 +352,7 @@ function isNameCandidate(t) {
 }
 
 function scrape() {
-  const r = { breakName:null, spotsLeft:null, totalSpots:0, availNames:[], soldNames:[], auctionPrice:null, currentBid:null, currentSoldName:null };
+  const r = { breakName:null, spotsLeft:null, totalSpots:0, availNames:[], soldNames:[], auctionPrice:null, currentBid:null, currentSoldName:null, revealName:null };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const texts = []; let nd;
   while ((nd = walker.nextNode())) { const t = nd.textContent.trim(); if (t.length >= 2 && t.length < 500) texts.push({ t, el: nd.parentElement }); }
@@ -503,6 +504,23 @@ function scrape() {
   // 3. Check for "Awaiting next item" (backup trigger)
   for (const {t} of texts) {
     if (/awaiting/i.test(t)) { r.awaiting = true; break; }
+  }
+
+  // 4. Stream reveal: detect "X's spot is ... [Team Name]" overlay on stream
+  for (const {t, el} of texts) {
+    let m = t.match(/spot\s+is\s*(?:\.{2,}|\u2026)?\s*(.+)/i);
+    if (!m && /spot\s+is/i.test(t)) {
+      // Check parent element's full text (handles split text nodes)
+      const tc = el.textContent.trim();
+      if (tc.length <= 200) m = tc.match(/spot\s+is\s*(?:\.{2,}|\u2026)?\s*(.+)/i);
+    }
+    if (m) {
+      const candidate = m[1].trim();
+      if (candidate.length >= 2 && candidate.length <= 60 && !/spot/i.test(candidate)) {
+        r.revealName = candidate;
+        break;
+      }
+    }
   }
 
   let availHdr = null, availTop = -Infinity, soldHdr = null, soldTop = -Infinity;
@@ -658,6 +676,18 @@ function applyScrape(d) {
     }
   }
 
+  // === STREAM OVERLAY REVEAL ===
+  // Detect "X's spot is ... [Team Name]" shown on stream when a pick is revealed
+  if (d.revealName) {
+    const revealed = matchName(d.revealName, nmap);
+    if (revealed && !S.soldSet.has(revealed)) {
+      S.soldSet.add(revealed);
+      S.availSet.delete(revealed);
+      if (!S.spotOrder.includes(revealed)) S.spotOrder.push(revealed);
+      console.log("[BO] Stream reveal: " + revealed);
+    }
+  }
+
   // === COUNTER RECONCILIATION ===
   const expectedSold = (S.spotsLeft !== null && S.totalSpots > 0) ? S.totalSpots - S.spotsLeft : null;
 
@@ -776,6 +806,13 @@ function handleApiMessage(data) {
       }
     }
   }
+  if (data.type === 'BO_GQL_URL') {
+    const { url } = data.payload || {};
+    if (url && !S._gqlUrl) {
+      S._gqlUrl = url;
+      console.log('[BO] GraphQL URL captured:', url);
+    }
+  }
 }
 
 // Listen for intercepted data from the MAIN world script
@@ -792,7 +829,8 @@ function setupApiListener() {
 async function fetchBreakSpots() {
   if (!S._breakId) return;
   try {
-    const resp = await fetch('/graphql/?operationName=QueryBreak&ssr=0', {
+    const gqlUrl = S._gqlUrl || '/api/graphql';
+    const resp = await fetch(gqlUrl + '?operationName=QueryBreak&ssr=0', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -808,7 +846,7 @@ async function fetchBreakSpots() {
         }
       })
     });
-    if (!resp.ok) return;
+    if (!resp.ok) { console.log('[BO] fetchBreakSpots HTTP ' + resp.status + ' — URL: ' + (S._gqlUrl || '/api/graphql')); return; }
     const json = await resp.json();
     if (json?.data?.getBreak) {
       processApiBreakData(json.data.getBreak, S._breakId);

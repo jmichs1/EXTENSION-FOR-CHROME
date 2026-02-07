@@ -31,6 +31,7 @@
     var args = arguments;
     var url = (typeof args[0] === 'string') ? args[0] : args[0]?.url || '';
     if (/graphql/i.test(url)) {
+      post({ type: 'BO_GQL_URL', payload: { url: url.split('?')[0] } });
       try {
         var body = typeof args[1]?.body === 'string' ? JSON.parse(args[1].body) : null;
         var vid = body?.variables?.id;
