@@ -163,6 +163,128 @@ const NFL_TEAMS = [
   {name:"Carolina Panthers",tier:4,weight:1.5},{name:"Arizona Cardinals",tier:4,weight:1.5},
 ];
 
+const NFL_PLAYERS = []; // placeholder — NFL player data TBD
+
+// Midnight allocation percentages (decimal fractions) — from Topps Midnight checklist
+// Teams: price-weighted allocation out of 9,000 total
+const MIDNIGHT_TEAM_ALLOC = {
+  "Atlanta Hawks":0.0078,"Boston Celtics":0.0256,"Brooklyn Nets":0.0256,
+  "Charlotte Hornets":0.1111,"Chicago Bulls":0.0067,"Cleveland Cavaliers":0.0067,
+  "Dallas Mavericks":0.2667,"Denver Nuggets":0.0222,"Detroit Pistons":0.0089,
+  "Golden State Warriors":0.0333,"Houston Rockets":0.0067,"Indiana Pacers":0.0111,
+  "Los Angeles Clippers":0.0067,"Los Angeles Lakers":0.0333,"Memphis Grizzlies":0.0222,
+  "Miami Heat":0.0111,"Milwaukee Bucks":0.0222,"Minnesota Timberwolves":0.0167,
+  "New Orleans Pelicans":0.0333,"New York Knicks":0.0222,"Oklahoma City Thunder":0.0278,
+  "Orlando Magic":0.0111,"Philadelphia 76ers":0.0389,"Phoenix Suns":0.0111,
+  "Portland Trail Blazers":0.0111,"Sacramento Kings":0.0056,"San Antonio Spurs":0.1333,
+  "Toronto Raptors":0.0111,"Utah Jazz":0.0389,"Washington Wizards":0.0111,
+};
+
+// Players: price-weighted allocation out of 25,936 total (168 players)
+const MIDNIGHT_PLAYER_ALLOC = {
+  "Ace Bailey":0.032349,"Adem Bona":0.001041,"Adou Thiero":0.001157,
+  "Alex Sarr":0.002390,"Alijah Martin":0.005359,"Allen Iverson":0.004820,
+  "Alonzo Mourning":0.001272,"Anthony Edwards":0.013225,"Antonio Reeves":0.000347,
+  "Asa Newell":0.006979,"Ben Saraf":0.003085,"Bogdan Bogdanovic":0.000347,
+  "Brandon Miller":0.003779,"Bronny James":0.001851,"Brooks Barnhizer":0.001157,
+  "Cade Cunningham":0.005128,"Calvin Murphy":0.000231,"Cam Christie":0.000887,
+  "Cam Spencer":0.001002,"Cam Thomas":0.000193,"Carmelo Anthony":0.001427,
+  "Cedric Coward":0.012145,"Chaz Lanier":0.002275,"Christian Laettner":0.000270,
+  "Colby Jones":0.000231,"Cole Anthony":0.000771,"Collin Murray-Boyles":0.014844,
+  "Collin Sexton":0.000308,"Cooper Flagg":0.173465,"Daniel Gafford":0.000231,
+  "Danny Wolf":0.002776,"Day'Ron Sharpe":0.000231,"De'Aaron Fox":0.001272,
+  "De'Andre Hunter":0.000733,"Dejounte Murray":0.000617,"Dennis Rodman":0.002005,
+  "Dereck Lively II":0.001041,"Derik Queen":0.026951,"Derrick White":0.001041,
+  "Desmond Bane":0.000733,"Dillon Brooks":0.001002,"Domantas Sabonis":0.001157,
+  "Donte DiVincenzo":0.001349,"Drake Powell":0.002352,"Dwyane Wade":0.003354,
+  "Dylan Harper":0.032349,"Egor Demin":0.010256,"Fred VanVleet":0.000655,
+  "Giannis Antetokounmpo":0.009446,"Gradey Dick":0.001889,"Grant Williams":0.000193,
+  "Harrison Ingram":0.000347,"Hugo Gonzalez":0.008058,"Isaiah Collier":0.001080,
+  "Jae'Sean Tate":0.000270,"Jaime Jaquez Jr.":0.000733,"Jake LaRavia":0.000655,
+  "Jalen Brunson":0.008058,"Jalen Green":0.000771,"Jalen Pickett":0.000231,
+  "Jalen Wilson":0.000193,"Jamir Watkins":0.001427,"Jaren Jackson Jr.":0.000887,
+  "Jarred Vanderbilt":0.000617,"Jason Kidd":0.000925,"Jaylen Wells":0.001195,
+  "Jaylon Tyson":0.001696,"Jayson Tatum":0.009986,"Jeremiah Fears":0.005128,
+  "Jett Howard":0.000308,"Jimmy Butler III":0.001041,"Joan Beringer":0.003239,
+  "Joel Embiid":0.000925,"John Stockton":0.002930,"Johni Broome":0.001041,
+  "Jordan Walsh":0.000771,"Josh Giddey":0.001041,"Josh Hart":0.000733,
+  "Julius Randle":0.000733,"Juwan Howard":0.000231,"Kam Jones":0.002082,
+  "Karl-Anthony Towns":0.001581,"Kawhi Leonard":0.001118,"Kel'el Ware":0.001002,
+  "Kevin Durant":0.005398,"Kevin Huerter":0.000347,"Kevin McCullar Jr":0.000231,
+  "Koby Brea":0.001311,"Kon Knueppel":0.064775,"Kyrie Irving":0.002660,
+  "Kyshawn George":0.004280,"LaMelo Ball":0.004897,"LeBron James":0.043145,
+  "Liam McNeeley":0.002082,"Lonzo Ball":0.000733,"Magic Johnson":0.005783,
+  "Maurice Cheeks":0.001002,"Max Strus":0.000887,"Metta World Peace":0.000617,
+  "Micah Peavy":0.001041,"Michael Porter Jr.":0.001696,"Multi Player Bundle":0.001157,
+  "Naz Reid":0.000733,"Nic Claxton":0.000193,"Nicolas Batum":0.000270,
+  "Nikola Jokic":0.018893,"Nikola Topic":0.001041,"Nikola Vucevic":0.001696,
+  "Nique Clifford":0.003162,"Noa Essengue":0.004974,"Noah Penda":0.001851,
+  "Nolan Traore":0.003316,"OG Anunoby":0.000925,"Onyeka Okongwu":0.001157,
+  "Oso Ighodaro":0.000655,"Paolo Banchero":0.002622,"Pascal Siakam":0.001272,
+  "Patrick Ewing":0.000810,"Paul George":0.000733,"Paul Pierce":0.002699,
+  "Payton Pritchard":0.001581,"Pelle Larsson":0.001118,"Quentin Grimes":0.000771,
+  "Rasheed Wallace":0.002159,"Rasheer Fleming":0.001619,"Ray Allen":0.001966,
+  "Reggie Jackson":0.000231,"Richard Jefferson":0.000347,"Rob Dillingham":0.000771,
+  "Robert Parish":0.000655,"Rudy Gobert":0.000655,"Ryan Kalkbrenner":0.002159,
+  "Saddiq Bey":0.000270,"Scoot Henderson":0.003046,
+  "Shai Gilgeous-Alexander":0.014844,"Shaquille O'Neal":0.005591,
+  "Sion James":0.001735,"Stephen Curry":0.043145,"Stephon Castle":0.010796,
+  "Thomas Sorber":0.004935,"Tim Duncan":0.001041,"Tim Hardaway":0.000308,
+  "Tony Parker":0.001041,"Tracy McGrady":0.004820,"Trae Young":0.001157,
+  "Tre Johnson III":0.004858,"Tristan da Silva":0.000617,"Tristen Newton":0.000270,
+  "Tyler Herro":0.001581,"Tyler Kolek":0.000771,"Tyler Smith":0.000193,
+  "Tyrese Haliburton":0.010102,"Tyrese Maxey":0.001080,
+  "Victor Wembanyama":0.124152,"Vince Carter":0.003779,
+  "Walter Clayton Jr.":0.017235,"Will Riley":0.004858,"Yang Hansen":0.006824,
+  "Yanic Konan-Niederhauser":0.002390,
+  "Aaron Gordon":0.000810,"Aaron Nesmith":0.000231,"Ajay Mitchell":0.001157,
+  "Alex English":0.000231,"Amen Thompson":0.000771,"Andrew Wiggins":0.000617,
+  "Anfernee Hardaway":0.000964,"Anfernee Simons":0.000231,"Anthony Davis":0.000231,
+  "Ausar Thompson":0.000771,"Austin Reaves":0.001735,"Ayo Dosunmu":0.000270,
+  "Ben Sheppard":0.000463,"Ben Wallace":0.000154,"Bones Hyland":0.000231,
+  "Carter Bryant":0.001349,"Chet Holmgren":0.003470,"Christian Braun":0.000231,
+  "CJ McCollum":0.000733,"Clyde Drexler":0.000887,"Damian Lillard":0.000655,
+  "DaRon Holmes II":0.000231,"David Robinson":0.001002,"David Thompson":0.000308,
+  "Deron Williams":0.000270,"Devin Booker":0.000540,"Dirk Nowitzki":0.001928,
+  "Dominique Wilkins":0.000733,"Donovan Mitchell":0.001504,"Eric Gordon":0.000231,
+  "Evan Mobley":0.000887,"Franz Wagner":0.000925,"George Gervin":0.000270,
+  "Hakeem Olajuwon":0.000810,"Isaiah Hartenstein":0.000887,"Ja Morant":0.001542,
+  "Jalen Williams":0.000193,"Jamal Murray":0.000771,"Jase Richardson":0.002545,
+  "Jaylen Brown":0.000617,"Johnny Furphy":0.000231,"Kasparas Jakucionis":0.003200,
+  "Kevin Garnett":0.001851,"Khaman Maluach":0.002892,"Kristaps Porzingis":0.000925,
+  "Larry Bird":0.003856,"Latrell Sprewell":0.000193,"Maxime Raynaud":0.003470,
+  "Mikal Bridges":0.001002,"Quinten Post":0.000270,"Rip Hamilton":0.000231,
+  "Ron Holland II":0.001542,"Jonathan Mogbo":0.002121,"Tyrese Proctor":0.001041,
+  "VJ Edgecombe":0.012222,"Walker Kessler":0.001002,"Zaccharie Risacher":0.001118,
+  "Zach Edey":0.000925,
+};
+
+// Midnight player list derived from allocation keys
+const MIDNIGHT_PLAYER_LIST = Object.keys(MIDNIGHT_PLAYER_ALLOC).map(n => ({ name: n, weight: MIDNIGHT_PLAYER_ALLOC[n] }));
+
+// Sapphire allocations: computed from existing weights
+const _pSum = PLAYER_LIST.reduce((s, p) => s + p.weight, 0);
+const SAPPHIRE_PLAYER_ALLOC = Object.fromEntries(PLAYER_LIST.map(p => [p.name, p.weight / _pSum]));
+// Sapphire team allocations: from Topps Chrome Sapphire checklist (total 39,590)
+const SAPPHIRE_TEAM_ALLOC = {
+  "Atlanta Hawks":0.0066,"Boston Celtics":0.0126,"Brooklyn Nets":0.0200,
+  "Charlotte Hornets":0.1516,"Chicago Bulls":0.0101,"Cleveland Cavaliers":0.0051,
+  "Dallas Mavericks":0.2594,"Denver Nuggets":0.0088,"Detroit Pistons":0.0088,
+  "Golden State Warriors":0.0379,"Houston Rockets":0.0101,"Indiana Pacers":0.0063,
+  "Los Angeles Clippers":0.0051,"Los Angeles Lakers":0.0581,"Memphis Grizzlies":0.0227,
+  "Miami Heat":0.0076,"Milwaukee Bucks":0.0096,"Minnesota Timberwolves":0.0101,
+  "New Orleans Pelicans":0.0253,"New York Knicks":0.0093,"Oklahoma City Thunder":0.0152,
+  "Orlando Magic":0.0099,"Philadelphia 76ers":0.0429,"Phoenix Suns":0.0071,
+  "Portland Trail Blazers":0.0126,"Sacramento Kings":0.0076,"San Antonio Spurs":0.1642,
+  "Toronto Raptors":0.0114,"Utah Jazz":0.0328,"Washington Wizards":0.0114,
+};
+
+function getAllocMap(productId, league, submode) {
+  if (league === "nba" && submode === "team") return productId === "midnight" ? MIDNIGHT_TEAM_ALLOC : SAPPHIRE_TEAM_ALLOC;
+  if (league === "nba" && submode === "player") return productId === "midnight" ? MIDNIGHT_PLAYER_ALLOC : SAPPHIRE_PLAYER_ALLOC;
+  return null; // NFL — no allocation data yet
+}
+
 const PRODUCTS = [
   { id:"sapphire", name:"2025 Topps Chrome Sapphire Basketball - Hobby", box:6000, case:60000 },
   { id:"midnight", name:"2025 Topps Midnight Basketball - Hobby", box:1200, case:9600 },
@@ -174,7 +296,7 @@ const PRODUCTS = [
 const G = { x: window.innerWidth - 345, y: 0, w: 340, h: window.innerHeight, bx: window.innerWidth - 60, by: 10 };
 
 const S = {
-  mode: "player", items: [], view: "open",
+  league: "nba", submode: "player", items: [], view: "open",
   filter: "all", search: "",
   breakName: null, spotsLeft: null, totalSpots: 0, soldSet: new Set(),
   productId: "sapphire", unit: "box", qty: 1,
@@ -186,7 +308,11 @@ const S = {
 };
 
 function loadDataset() {
-  const src = S.mode === "player" ? PLAYER_LIST : S.mode === "nba" ? NBA_TEAMS : NFL_TEAMS;
+  let src;
+  if (S.league === "nba" && S.submode === "player") src = S.productId === "midnight" ? MIDNIGHT_PLAYER_LIST : PLAYER_LIST;
+  else if (S.league === "nba" && S.submode === "team") src = NBA_TEAMS;
+  else if (S.league === "nfl" && S.submode === "player") src = NFL_PLAYERS;
+  else src = NFL_TEAMS;
   S.items = src.map(s => ({ name: s.name, weight: s.weight, tier: s.tier || null, available: !S.soldSet.has(s.name) }));
 }
 
@@ -207,7 +333,8 @@ function matchName(raw, nmap) {
 }
 function isNameCandidate(t) {
   if (t.length < 3 || t.length > 60) return false;
-  if (/^(Sold|Available|Coming|How|Random|See|Show|Break|Spot|Ship|\$|\d|Upcoming|Giveaway|Filter|Sort|Auction|Qty|Bid|Custom)/i.test(t)) return false;
+  if (/^(Sold|Available|How|Random|See|Show|Break|Spot|Ship|\$|\d|Upcoming|Giveaway|Filter|Sort|Auction|Qty|Bid|Custom)/i.test(t)) return false;
+  if (/^Coming\s*Up$/i.test(t)) return false;
   if (/spots?\s*\(/i.test(t) || /^\d+\s+(of|left)/i.test(t) || /Filling|left|Taxes|Search/i.test(t)) return false;
   const lt = (t.match(/[a-zA-Z]/g)||[]).length; return lt >= 3 && lt >= t.length * 0.4;
 }
@@ -218,7 +345,9 @@ function scrape() {
   const texts = []; let nd;
   while ((nd = walker.nextNode())) { const t = nd.textContent.trim(); if (t.length >= 2 && t.length < 500) texts.push({ t, el: nd.parentElement }); }
 
-  for (const {t} of texts) { if (/BREAK|CASE|RANDOM|SAPPHIRE/i.test(t) && t.length > 15 && t.length < 200) { r.breakName = t.substring(0,80); break; } }
+  for (const {t} of texts) { if (/BREAK|CASE|RANDOM|SAPPHIRE|MIDNIGHT/i.test(t) && t.length > 15 && t.length < 200) { r.breakName = t.substring(0,80); break; } }
+  // Also detect "Random Team" / "Random Player" label
+  for (const {t} of texts) { if (/^Random\s+(Team|Player)$/i.test(t)) { r.breakType = t; break; } }
   for (const {t} of texts) { const m = t.match(/(\d+)\s+of\s+(\d+)\s+left/i); if (m) { r.spotsLeft = +m[1]; r.totalSpots = +m[2]; break; } }
   if (r.spotsLeft === null) { for (const {t} of texts) { const m = t.match(/(\d+)\s+left/i); if (m) { r.spotsLeft = +m[1]; break; } } }
 
@@ -258,6 +387,56 @@ function scrape() {
     if (bestPrice !== null) r.auctionPrice = bestPrice;
   }
 
+  // 2b. If "Sold" visible, also find the item name near the auction bar
+  if (soldRect) {
+    const nmap = buildNameMap();
+    let bestName = null, bestDist = Infinity;
+    for (const {t, el} of texts) {
+      if (!isNameCandidate(t)) continue;
+      const matched = matchName(t, nmap);
+      if (!matched) continue;
+      const rc = el.getBoundingClientRect();
+      if (rc.width === 0 || rc.height === 0) continue;
+      // Look for names near the sold bar (within 100px vertically)
+      const dy = Math.abs(rc.top - soldRect.top);
+      if (dy < 100 && dy < bestDist) {
+        bestDist = dy;
+        bestName = matched;
+      }
+    }
+    if (bestName) r.auctionName = bestName;
+  }
+
+  // 2c. Also detect "Coming Up" item — the item currently being shown/auctioned
+  for (const {t, el} of texts) {
+    if (/^Coming\s*Up$/i.test(t)) {
+      // The item name is usually a sibling or nearby element
+      const parent = el.parentElement;
+      if (parent) {
+        const siblings = parent.querySelectorAll('*');
+        const nmap = buildNameMap();
+        for (const sib of siblings) {
+          const st = sib.textContent.trim();
+          if (st !== t && isNameCandidate(st)) {
+            const matched = matchName(st, nmap);
+            if (matched) { r.comingUp = matched; break; }
+          }
+        }
+        // Also check parent's parent
+        if (!r.comingUp && parent.parentElement) {
+          for (const sib of parent.parentElement.children) {
+            const st = sib.textContent.trim();
+            if (isNameCandidate(st)) {
+              const matched = matchName(st, nmap);
+              if (matched) { r.comingUp = matched; break; }
+            }
+          }
+        }
+      }
+      break;
+    }
+  }
+
   // 3. Check for "Awaiting next item" (backup trigger)
   for (const {t} of texts) {
     if (/awaiting/i.test(t)) { r.awaiting = true; break; }
@@ -279,8 +458,44 @@ function scrape() {
   return r;
 }
 
+// Auto-detect product, unit, qty, league, submode from break title
+function parseBreakTitle(title) {
+  if (!title) return;
+  const t = title.toUpperCase();
+
+  // Product detection
+  if (/MIDNIGHT/i.test(t) && S.productId !== "midnight") {
+    S.productId = "midnight"; loadDataset();
+  } else if (/SAPPHIRE/i.test(t) && S.productId !== "sapphire") {
+    S.productId = "sapphire"; loadDataset();
+  }
+
+  // Unit detection: "CASE" or "BOX"
+  if (/\bCASE\b/i.test(t)) S.unit = "case";
+  else if (/\bBOX\b/i.test(t)) S.unit = "box";
+
+  // Quantity: look for patterns like "2 CASE", "x3", "3x", "× 2"
+  const qm = t.match(/(\d+)\s*(?:CASE|BOX)/i) || t.match(/[X×]\s*(\d+)/i) || t.match(/(\d+)\s*[X×]/i);
+  if (qm) { const q = parseInt(qm[1]); if (q >= 1 && q <= 10) S.qty = q; }
+
+  // League detection
+  if (/\bNBA\b/i.test(t) && S.league !== "nba") {
+    S.league = "nba"; S.soldSet.clear(); loadDataset();
+  } else if (/\bNFL\b/i.test(t) && S.league !== "nfl") {
+    S.league = "nfl"; S.soldSet.clear(); loadDataset();
+  }
+
+  // Submode detection: "RANDOM TEAM" → team mode, "RANDOM PLAYER" → player mode
+  if (/\bTEAM\b/i.test(t) && S.submode !== "team") {
+    S.submode = "team"; S.soldSet.clear(); loadDataset();
+  } else if (/\bPLAYER\b/i.test(t) && S.submode !== "player") {
+    S.submode = "player"; S.soldSet.clear(); loadDataset();
+  }
+}
+
 function applyScrape(d) {
-  if (d.breakName) S.breakName = d.breakName;
+  if (d.breakName) { S.breakName = d.breakName; parseBreakTitle(d.breakName); }
+  if (d.breakType) parseBreakTitle(d.breakType);
   if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
   if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
 
@@ -297,11 +512,22 @@ function applyScrape(d) {
   const soldJustAppeared = d.hasSold && !S._wasSold;
   const awaitJustAppeared = d.awaiting && !S._wasAwaiting;
 
-  if ((soldJustAppeared || awaitJustAppeared) && S.lastPrice && !S._saleCommitted) {
-    S.revenue += S.lastPrice;
-    S.bids.push({ a: S.lastPrice, t: Date.now(), auto: true });
-    console.log("[BO] ✅ Revenue: +$" + S.lastPrice + (soldJustAppeared ? " (sold trigger)" : " (await trigger)"));
-    S._saleCommitted = true; // don't double-add for same sale
+  // Track the currently auctioning item name
+  if (d.auctionName) S._currentAuctionItem = d.auctionName;
+  else if (d.comingUp) S._currentAuctionItem = d.comingUp;
+
+  if ((soldJustAppeared || awaitJustAppeared) && !S._saleCommitted) {
+    // Mark the auctioned item as sold
+    if (S._currentAuctionItem) {
+      S.soldSet.add(S._currentAuctionItem);
+      console.log("[BO] ✅ Sold: " + S._currentAuctionItem + (S.lastPrice ? " for $" + S.lastPrice : ""));
+    }
+    if (S.lastPrice) {
+      S.revenue += S.lastPrice;
+      S.bids.push({ a: S.lastPrice, t: Date.now(), auto: true });
+    }
+    S._saleCommitted = true;
+    S._currentAuctionItem = null; // consumed
   }
 
   // Reset when auction cycle resets (no longer sold or awaiting)
@@ -315,7 +541,12 @@ function applyScrape(d) {
   S._wasAwaiting = !!d.awaiting;
 
   for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) S.soldSet.add(m); }
-  if (d.availNames.length >= 5) { for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) S.soldSet.delete(m); } }
+  if (d.availNames.length >= 5) {
+    const availSet = new Set();
+    for (const raw of d.availNames) { const m = matchName(raw, nmap); if (m) { S.soldSet.delete(m); availSet.add(m); } }
+    if (availSet.size >= 3) { for (const it of S.items) { if (!availSet.has(it.name)) S.soldSet.add(it.name); } }
+  }
+
   for (const it of S.items) it.available = !S.soldSet.has(it.name);
 }
 
@@ -345,18 +576,21 @@ function calc() {
   const totalPlayers = S.items.length; // always 328 for player mode
   const remaining = pAvail !== null ? pAvail : S.items.filter(i => i.available).length;
 
-  // VALUE = fixed: totalCost / totalPlayers (never changes)
+  // VALUE = allocation-weighted: totalCost × alloc% per spot
   // ODDS = 1 / remaining (changes as spots sell)
   // EV = odds × value
-  const fixedValue = totalValue / totalPlayers;
+  const allocMap = getAllocMap(S.productId, S.league, S.submode);
+  let remainingValue = 0;
   for (const i of S.items) {
     if (i.available && remaining > 0) {
+      const alloc = allocMap?.[i.name] || (1 / totalPlayers);
+      i.dollarVal = totalValue * alloc;
       i.livePct = (1 / remaining) * 100;
-      i.dollarVal = fixedValue;
-      i.ev = (1 / remaining) * fixedValue;
+      i.ev = (1 / remaining) * i.dollarVal;
+      remainingValue += i.dollarVal;
     } else { i.livePct = 0; i.dollarVal = 0; i.ev = 0; }
   }
-  const evPerSpot = remaining > 0 ? ((1 / remaining) * fixedValue) : 0;
+  const evPerSpot = remaining > 0 ? (remainingValue / remaining) : 0;
   const boxCost = product.box * S.qty, caseCost = product.case * S.qty;
   return {
     avail: pAvail !== null ? pAvail : remaining, sold: pSold, total: pTotal,
@@ -457,7 +691,7 @@ function render() {
   const cntLine = S.spotsLeft !== null ? `${S.spotsLeft} of ${S.totalSpots} left` : "";
 
   let items = [...S.items];
-  items.sort((a, b) => { if (a.available !== b.available) return a.available ? -1 : 1; return a.name.localeCompare(b.name); });
+  items.sort((a, b) => { if (a.available !== b.available) return a.available ? -1 : 1; if (a.available) return b.dollarVal - a.dollarVal; return a.name.localeCompare(b.name); });
   if (S.filter === "available") items = items.filter(i => i.available);
   else if (S.filter === "sold") items = items.filter(i => !i.available);
   else if (S.filter === "high") items = items.filter(i => i.dollarVal > 50);
@@ -468,26 +702,23 @@ function render() {
     const cls = it.available ? "av" : "sd";
     const valStr = it.available ? "$" + it.dollarVal.toFixed(0) : "—";
     const valCls = it.dollarVal > 500 ? "hot" : it.dollarVal > 50 ? "warm" : "";
-    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rw">${it.livePct.toFixed(2)}%</span><span class="rp ${valCls}">${valStr}</span><button class="tb">${it.available?"−":"+"}</button></div>`;
+    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span><button class="tb">${it.available?"−":"+"}</button></div>`;
   }
   const fBtn = (f,l) => `<button class="fb${S.filter===f?" fa":""}" data-f="${f}">${l}</button>`;
   const prodOpts = PRODUCTS.map(p=>`<option value="${p.id}"${S.productId===p.id?" selected":""}>${p.name}</option>`).join("");
   const qtyOpts = Array.from({length:10},(_,i)=>`<option value="${i+1}"${S.qty===(i+1)?" selected":""}>${i+1}</option>`).join("");
   const product = PRODUCTS.find(p=>p.id===S.productId)||PRODUCTS[0];
   const unitPrice = S.unit==="case"?product.case:product.box;
-  const cost = S.unit === "case" ? odds.caseCost : odds.boxCost;
-  const ret = S.revenue - cost;
-  const retStr = ret >= 0 ? "+$" + ret.toLocaleString() : "($" + Math.abs(ret).toLocaleString() + ")";
-  const retCls = ret >= 0 ? "rvg" : "rvrd";
 
   bo.innerHTML = `
     <div class="hd" id="dragH"><div class="hl"><span class="lg">🏀 BREAK ODDS</span><span class="bn">${brkLine}</span>${cntLine?`<span class="cl">${cntLine}</span>`:""}</div><div class="hb"><button id="colBtn" class="ib" title="Collapse">◁</button></div></div>
     <div class="psel"><select id="prodSel" class="sel">${prodOpts}</select><div class="prow"><select id="unitSel" class="sel sm"><option value="box"${S.unit==="box"?" selected":""}>Box</option><option value="case"${S.unit==="case"?" selected":""}>Case</option></select><span class="px">×</span><select id="qtySel" class="sel sm">${qtyOpts}</select><span class="ptotal">= $${(unitPrice*S.qty).toLocaleString()}</span></div></div>
-    <div class="rvs"><div class="rvh"><span class="rvl">💰 REVENUE (${S.bids.length} sales)</span><span class="rvt ${retCls}">$${S.revenue.toLocaleString()}</span></div><div class="rvr"><div class="rvm"><span class="rvv ${retCls}">${retStr}</span><span class="rvsb">Return on ${S.unit === "case" ? "Case" : "Box"} ($${cost.toLocaleString()})</span></div></div><div class="rvir"><input type="number" id="bidIn" class="si bidi" placeholder="$ amount" min="0" step="1"><button id="addB" class="ftb accent">+ Add</button><button id="undoB" class="ftb">Undo</button><button id="clrB" class="ftb">Clear</button></div></div>
-    <div class="mb"><button class="mm${S.mode==="player"?" ma":""}" data-m="player">🃏 Player</button><button class="mm${S.mode==="nba"?" ma":""}" data-m="nba">🏀 NBA</button><button class="mm${S.mode==="nfl"?" ma":""}" data-m="nfl">🏈 NFL</button></div>
+
+    <div class="mb"><button class="lg-btn${S.league==="nba"?" ma":""}" data-lg="nba">🏀 NBA</button><button class="lg-btn${S.league==="nfl"?" ma":""}" data-lg="nfl">🏈 NFL</button></div>
+    <div class="mb sub"><button class="sm-btn${S.submode==="player"?" ma":""}" data-sm="player">🃏 Player</button><button class="sm-btn${S.submode==="team"?" ma":""}" data-sm="team">🏅 Team</button></div>
     <div class="sb"><div class="s"><span class="sv">${odds.avail}</span><span class="sn">Avail</span></div><div class="s"><span class="sv">${odds.sold}</span><span class="sn">Sold</span></div><div class="s"><span class="sv">${odds.total}</span><span class="sn">Total</span></div><div class="s ev"><span class="sv">$${odds.evPerSpot}</span><span class="sn">EV/Spot</span></div></div>
     <div class="tb2"><input type="text" id="srch" class="si" placeholder="Search..." value="${S.search||""}"><div class="fr">${fBtn("all","All")}${fBtn("available","Avail")}${fBtn("sold","Sold")}${fBtn("high","High$")}</div></div>
-    <div class="lh"><span></span><span>Name</span><span>Odds</span><span>Value</span><span></span></div>
+    <div class="lh"><span></span><span>Name</span><span>Value</span><span></span></div>
     <div id="lb" class="lb">${rows}</div>
     <div class="ft"><button id="syncB" class="ftb accent">⟳ Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
     <div class="rz rz-n" data-e="n"></div><div class="rz rz-s" data-e="s"></div><div class="rz rz-e" data-e="e"></div><div class="rz rz-w" data-e="w"></div>
@@ -498,17 +729,14 @@ function render() {
   bo.querySelector("#dragH").onmousedown = e => beginDrag(e, bo);
   bo.querySelectorAll(".rz").forEach(h => { h.onmousedown = e => beginResize(e, bo, h.dataset.e); });
   bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { S.view="collapsed"; render(); } };
-  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; render(); };
+  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S.soldSet.clear(); loadDataset(); render(); };
   bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; render(); };
   bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); render(); };
 
-  // Revenue
-  bo.querySelector("#addB").onclick = () => { const v=parseFloat(bo.querySelector("#bidIn").value); if (v>0){S.bids.push({a:v,t:Date.now()});S.revenue+=v;render();} };
-  bo.querySelector("#bidIn").onkeydown = e => { if (e.key==="Enter") bo.querySelector("#addB").click(); };
-  bo.querySelector("#undoB").onclick = () => { if (S.bids.length){const l=S.bids.pop();S.revenue=Math.max(0,S.revenue-l.a);render();} };
-  bo.querySelector("#clrB").onclick = () => { S.bids=[];S.revenue=0;render(); };
 
-  bo.querySelectorAll(".mm").forEach(b => b.onclick = () => { if(!wasDrag()){S.mode=b.dataset.m;S.soldSet.clear();loadDataset();doScrape();} });
+
+  bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S.soldSet.clear();loadDataset();doScrape();} });
+  bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S.soldSet.clear();loadDataset();doScrape();} });
   bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render();} });
   bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(); };
   bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.items.forEach(i=>i.available=true); render(); };
@@ -520,8 +748,9 @@ function render() {
 }
 
 function doScrape() {
-  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| sold?:",!!d.hasSold,"| $:",d.auctionPrice,"| await:",!!d.awaiting,"| stored$:",S.lastPrice,"| wasSold:",S._wasSold,"| committed:",S._saleCommitted); applyScrape(d); render(); } catch(e){console.error("[BO] err:",e);}
+  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| sold?:",!!d.hasSold,"| $:",d.auctionPrice,"| name:",d.auctionName||"-","| coming:",d.comingUp||"-","| avail:",d.availNames.length,"| sold:",d.soldNames.length,"| soldSet:",S.soldSet.size); applyScrape(d); render(); } catch(e){console.error("[BO] err:",e);}
 }
+
 
 // ================================================================
 // AUTO-REFRESH
@@ -592,9 +821,11 @@ const CSS = `
 .bidi::-webkit-inner-spin-button{-webkit-appearance:none}
 
 .mb{display:flex;gap:4px;padding:6px 12px;background:#080c14;border-bottom:1px solid #1e2a45}
-.mm{flex:1;padding:5px 6px;background:#161f32;border:1px solid #1e2a45;border-radius:5px;color:#7b8ba8;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;font-family:inherit}
-.mm:hover{border-color:#7b8ba8}
-.mm.ma{background:rgba(0,255,135,.12);border-color:#00ff87;color:#00ff87}
+.mb.sub{padding-top:0}
+.lg-btn,.sm-btn{flex:1;padding:5px 6px;background:#161f32;border:1px solid #1e2a45;border-radius:5px;color:#7b8ba8;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;font-family:inherit}
+.lg-btn:hover,.sm-btn:hover{border-color:#7b8ba8}
+.lg-btn.ma{background:rgba(0,255,135,.12);border-color:#00ff87;color:#00ff87}
+.sm-btn.ma{background:rgba(100,180,255,.12);border-color:#64b4ff;color:#64b4ff}
 
 .sb{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#1e2a45;border-bottom:1px solid #1e2a45}
 .s{display:flex;flex-direction:column;align-items:center;padding:7px 4px;background:#0f1520}
@@ -635,12 +866,186 @@ const CSS = `
 // ================================================================
 // INIT
 // ================================================================
+// Periodic silent scrape: open See Spots invisibly, scrape, close
+let _silentScrapeRunning = false;
+let _silentHideStyle = null;
+
+function silentScrape() {
+  if (_silentScrapeRunning) return;
+
+  // Find "See Spots" button — only matches when the panel is NOT already open
+  let seeBtn = null;
+  const btns = document.querySelectorAll('button, [role="button"]');
+  for (const b of btns) {
+    const t = b.textContent.trim();
+    if (/^see\s+spots?$/i.test(t) && b.offsetWidth > 0) { seeBtn = b; break; }
+  }
+  if (!seeBtn) {
+    console.log("[BO] silentScrape: no 'See Spots' button found (panel may be open already or not on break page)");
+    return;
+  }
+
+  _silentScrapeRunning = true;
+  console.log("[BO] silentScrape: starting...");
+
+  // STEP 1: Inject a global CSS rule to hide any new overlays/panels BEFORE clicking
+  // This prevents the visual flash. We target common panel patterns on Whatnot.
+  _silentHideStyle = document.createElement('style');
+  _silentHideStyle.id = '__bo_silent_hide';
+  _silentHideStyle.textContent = `
+    .__bo_hidden_panel { opacity: 0 !important; pointer-events: none !important; position: fixed !important; }
+  `;
+  document.head.appendChild(_silentHideStyle);
+
+  // STEP 2: Click "See Spots"
+  seeBtn.click();
+  console.log("[BO] silentScrape: clicked See Spots");
+
+  // STEP 3: Wait for panel to render, then find and hide it
+  setTimeout(() => {
+    // Find the spots panel — look for a fixed/absolute container that has "Available Spots" or "Sold Spots"
+    let spotsPanel = null;
+    const walker1 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let nd1;
+    while ((nd1 = walker1.nextNode())) {
+      const txt = nd1.textContent.trim();
+      if (/^(Available|Sold)\s+Spots?\s*\(\d+\)/i.test(txt)) {
+        // Walk up to find the outermost fixed/absolute panel
+        let p = nd1.parentElement;
+        let candidate = null;
+        while (p && p !== document.body) {
+          const st = window.getComputedStyle(p);
+          if (st.position === 'fixed' || st.position === 'absolute') {
+            candidate = p; // keep going up to find the outermost one
+          }
+          p = p.parentElement;
+        }
+        if (candidate) { spotsPanel = candidate; break; }
+      }
+    }
+
+    if (spotsPanel) {
+      spotsPanel.classList.add('__bo_hidden_panel');
+      console.log("[BO] silentScrape: found & hid spots panel");
+    } else {
+      console.log("[BO] silentScrape: WARNING - couldn't find spots panel container");
+    }
+
+    // STEP 4: Expand "Sold Spots" section by clicking it
+    // Try multiple strategies: click the text, its parent, look for expandable elements
+    let expandedSold = false;
+    const walker2 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let nd2;
+    while ((nd2 = walker2.nextNode())) {
+      if (/^Sold\s+Spots?\s*\(\d+\)/i.test(nd2.textContent.trim())) {
+        // Strategy 1: Walk up looking for clickable ancestor
+        let target = nd2.parentElement;
+        for (let i = 0; i < 8 && target && target !== document.body; i++) {
+          const tag = target.tagName;
+          const role = target.getAttribute('role') || '';
+          const cursor = window.getComputedStyle(target).cursor;
+          if (tag === 'BUTTON' || role === 'button' || cursor === 'pointer' || target.onclick) {
+            target.click();
+            expandedSold = true;
+            console.log("[BO] silentScrape: clicked Sold Spots header (depth " + i + ")");
+            break;
+          }
+          target = target.parentElement;
+        }
+        // Strategy 2: If no clickable ancestor found, just click the text element and its immediate parents
+        if (!expandedSold) {
+          const el = nd2.parentElement;
+          if (el) { el.click(); console.log("[BO] silentScrape: clicked Sold Spots text parent directly"); }
+          if (el?.parentElement) { el.parentElement.click(); }
+          expandedSold = true;
+        }
+        break;
+      }
+    }
+    if (!expandedSold) console.log("[BO] silentScrape: WARNING - couldn't find Sold Spots header to expand");
+
+    // STEP 5: Wait for sold items to render, then scrape
+    setTimeout(() => {
+      doScrape();
+      console.log("[BO] silentScrape: scraped. soldSet size:", S.soldSet.size, "items:", [...S.soldSet].join(", "));
+
+      // STEP 6: Close the panel
+      _silentClose(spotsPanel);
+
+      _silentScrapeRunning = false;
+    }, 1500);
+  }, 1200);
+}
+
+function _silentClose(spotsPanel) {
+  // Strategy 1: Find close/X button within or near the panel
+  const searchRoot = spotsPanel || document.body;
+  const closeCandidates = searchRoot.querySelectorAll('button, [role="button"], svg');
+  let closed = false;
+  for (const b of closeCandidates) {
+    const t = b.textContent.trim();
+    const label = b.getAttribute('aria-label') || '';
+    // Match: × ✕ ✖ X close, or SVG close icons, or aria-label="close"
+    if (/^[×✕✖xX]$/.test(t) || /close/i.test(label) || /close/i.test(t)) {
+      b.click();
+      closed = true;
+      console.log("[BO] silentScrape: closed panel via close button");
+      break;
+    }
+  }
+
+  // Strategy 2: If no close button found in panel, search globally
+  if (!closed) {
+    const allBtns = document.querySelectorAll('button, [role="button"]');
+    for (const b of allBtns) {
+      const t = b.textContent.trim();
+      const label = b.getAttribute('aria-label') || '';
+      if (/^[×✕✖]$/.test(t) || /^close$/i.test(label)) {
+        b.click();
+        closed = true;
+        console.log("[BO] silentScrape: closed panel via global close button");
+        break;
+      }
+    }
+  }
+
+  // Strategy 3: Click backdrop/overlay if present
+  if (!closed) {
+    const overlays = document.querySelectorAll('[class*="overlay"], [class*="backdrop"], [class*="modal-bg"]');
+    for (const ov of overlays) {
+      if (ov !== spotsPanel && ov.offsetWidth > 0) {
+        ov.click();
+        closed = true;
+        console.log("[BO] silentScrape: closed panel via backdrop click");
+        break;
+      }
+    }
+  }
+
+  // Strategy 4: Press Escape key
+  if (!closed) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    console.log("[BO] silentScrape: dispatched Escape key to close panel");
+  }
+
+  // Clean up: remove hidden class and style
+  if (spotsPanel) {
+    spotsPanel.classList.remove('__bo_hidden_panel');
+  }
+  if (_silentHideStyle) {
+    _silentHideStyle.remove();
+    _silentHideStyle = null;
+  }
+}
+
 loadDataset();
 createRoot();
-doScrape();
 render();
-startAuto();
 startObserver();
+startAuto();
+// Run silent scrape after page settles, then periodically
+setTimeout(silentScrape, 3000);
+setInterval(() => { if (!_silentScrapeRunning) silentScrape(); }, 30000);
 console.log("[Break Odds v4] Overlay loaded.");
 
 })();

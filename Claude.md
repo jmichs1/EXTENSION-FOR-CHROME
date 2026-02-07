@@ -50,3 +50,4 @@ The entire app lives in `content.js`, organized into sections:
 
 - `activeTab`, `storage`, `scripting`
 - Host: `https://www.whatnot.com/*`
+
