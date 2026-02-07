@@ -341,6 +341,7 @@ const S = {
   _lastNetworkScrape: null, // timestamp of last successful API data
   _breakId: null,           // current break ID from intercepted API
   _gqlUrl: null,            // captured GraphQL endpoint URL from interceptor
+  _hasApiData: false,       // true once API data received — locks out DOM overwrite
   spotOrder: [],            // string[] — names in pick order
   currentBid: null,         // current auction bid price
 };
@@ -601,9 +602,9 @@ function parseBreakTitle(title) {
   // League detection (skip if user manually selected)
   if (!S._manualLeague) {
     if ((/\bNBA\b/i.test(t) || /\bBASKETBALL\b/i.test(t)) && S.league !== "nba") {
-      S.league = "nba"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
+      S.league = "nba"; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     } else if ((/\bNFL\b/i.test(t) || /\bFOOTBALL\b/i.test(t)) && S.league !== "nfl") {
-      S.league = "nfl"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
+      S.league = "nfl"; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     }
   }
 
@@ -611,9 +612,9 @@ function parseBreakTitle(title) {
   // Skip if user manually toggled submode
   if (!S._manualSubmode) {
     if (/\bTEAM\s*(BREAK|RANDOM)|\bRANDOM\s*TEAM\b|\bTEAM\b/i.test(t) && S.submode !== "team") {
-      S.submode = "team"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
+      S.submode = "team"; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     } else if (/\bPLAYER\s*(BREAK|RANDOM)|\bRANDOM\s*PLAYER\b|\bPLAYER\b/i.test(t) && S.submode !== "player") {
-      S.submode = "player"; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
+      S.submode = "player"; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset();
     }
   }
 }
@@ -658,9 +659,10 @@ function applyScrape(d) {
   S._wasSold = !!d.hasSold;
   S._wasAwaiting = !!d.awaiting;
 
-  // === SOLD/AVAILABLE DETECTION (v14 dual tracking) ===
+  // === SOLD/AVAILABLE DETECTION ===
   if (d._source === 'api') {
-    // API data is authoritative
+    // API data is authoritative — lock in and prevent DOM overwrite
+    S._hasApiData = true;
     const apiSold = new Set();
     const apiAvail = new Set();
     for (const raw of d.soldNames) { const m = matchName(raw, nmap); if (m) apiSold.add(m); }
@@ -670,11 +672,9 @@ function applyScrape(d) {
     S.soldSet = apiSold;
     S.availSet = apiAvail;
   } else {
-    // DOM-based dual tracking — ONLY when API data is stale (>30s old)
-    // When API data is fresh, it's authoritative — don't let DOM scraping override it
-    const apiFresh = S._lastNetworkScrape && (Date.now() - S._lastNetworkScrape < 30000);
-    if (!apiFresh) {
-      // Mark current sold player from auction title dash pattern
+    // DOM-based tracking
+    if (!S._hasApiData) {
+      // No API data yet — DOM is our only source, use full tracking
       if (d.currentSoldName) {
         const soldPlayer = matchName(d.currentSoldName, nmap);
         if (soldPlayer) {
@@ -686,20 +686,18 @@ function applyScrape(d) {
           }
         }
       }
-      // Accumulate confirmed sold names from DOM
       for (const raw of d.soldNames) {
         const m = matchName(raw, nmap);
         if (m) { S.availSet.delete(m); if (!S.soldSet.has(m)) { S.soldSet.add(m); if (!S.spotOrder.includes(m)) S.spotOrder.push(m); } }
       }
-      // Accumulate confirmed available names from DOM
       for (const raw of d.availNames) {
         const m = matchName(raw, nmap);
         if (m) { S.availSet.add(m); S.soldSet.delete(m); const idx = S.spotOrder.indexOf(m); if (idx >= 0) S.spotOrder.splice(idx, 1); }
       }
     }
-    // Always process auction-state sold detection (revenue state machine already handled above)
-    // even when API is fresh — the dash-pattern can catch real-time sales faster than API polling
-    if (apiFresh && d.currentSoldName) {
+    // Always process live auction detection (dash-pattern catches real-time sales)
+    // This only ADDS to soldSet, never removes — safe even with API data
+    if (d.currentSoldName) {
       const soldPlayer = matchName(d.currentSoldName, nmap);
       if (soldPlayer && !S.soldSet.has(soldPlayer)) {
         S.soldSet.add(soldPlayer); S.availSet.delete(soldPlayer);
@@ -709,8 +707,7 @@ function applyScrape(d) {
     }
   }
 
-  // === STREAM OVERLAY REVEAL ===
-  // Detect "X's spot is ... [Team Name]" shown on stream when a pick is revealed
+  // === STREAM OVERLAY REVEAL (always runs — only adds, never removes) ===
   if (d.revealName) {
     const revealed = matchName(d.revealName, nmap);
     if (revealed && !S.soldSet.has(revealed)) {
@@ -721,38 +718,40 @@ function applyScrape(d) {
     }
   }
 
-  // === COUNTER RECONCILIATION ===
-  const expectedSold = (S.spotsLeft !== null && S.totalSpots > 0) ? S.totalSpots - S.spotsLeft : null;
-
-  // Step 1: Set status for confirmed players
+  // === SET ITEM STATUS ===
   for (const it of S.items) {
     if (S.soldSet.has(it.name)) { it.available = false; }
     else if (S.availSet.has(it.name)) { it.available = true; }
     else { it.available = true; }
   }
 
-  // Step 2: If counter says more should be sold, mark cheapest unconfirmed as sold
-  if (expectedSold !== null) {
-    const confirmedSold = S.items.filter(i => !i.available).length;
-    if (confirmedSold < expectedSold) {
-      const allocMap = getAllocMap(S.productId, S.league, S.submode);
-      const totalPlayers = S.items.length;
-      const unconfirmed = S.items.filter(i => i.available && !S.availSet.has(i.name));
-      unconfirmed.sort((a, b) => {
-        const allocA = allocMap?.[a.name] || (1 / totalPlayers);
-        const allocB = allocMap?.[b.name] || (1 / totalPlayers);
-        return allocA - allocB;
-      });
-      let needed = expectedSold - confirmedSold;
-      for (const it of unconfirmed) {
-        if (needed <= 0) break;
-        it.available = false;
-        needed--;
+  // === COUNTER RECONCILIATION — only when no API data ===
+  // When API data exists, it already tells us exactly which teams are sold.
+  // Counter reconciliation guesses cheapest teams which is wrong — skip it.
+  if (!S._hasApiData) {
+    const expectedSold = (S.spotsLeft !== null && S.totalSpots > 0) ? S.totalSpots - S.spotsLeft : null;
+    if (expectedSold !== null) {
+      const confirmedSold = S.items.filter(i => !i.available).length;
+      if (confirmedSold < expectedSold) {
+        const allocMap = getAllocMap(S.productId, S.league, S.submode);
+        const totalPlayers = S.items.length;
+        const unconfirmed = S.items.filter(i => i.available && !S.availSet.has(i.name));
+        unconfirmed.sort((a, b) => {
+          const allocA = allocMap?.[a.name] || (1 / totalPlayers);
+          const allocB = allocMap?.[b.name] || (1 / totalPlayers);
+          return allocA - allocB;
+        });
+        let needed = expectedSold - confirmedSold;
+        for (const it of unconfirmed) {
+          if (needed <= 0) break;
+          it.available = false;
+          needed--;
+        }
       }
     }
   }
 
-  // Step 3: Assign pick numbers
+  // === ASSIGN PICK NUMBERS ===
   for (const it of S.items) {
     it.spotNum = S.spotOrder.indexOf(it.name) >= 0 ? S.spotOrder.indexOf(it.name) + 1 : 0;
   }
@@ -811,8 +810,8 @@ function processApiBreakData(breakData, breakId) {
   // Auto-detect spotType → submode
   if (breakData.spotType && !S._manualSubmode) {
     const st = breakData.spotType.toLowerCase();
-    if (st === 'team' && S.submode !== 'team') { S.submode = 'team'; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
-    else if (st === 'player' && S.submode !== 'player') { S.submode = 'player'; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
+    if (st === 'team' && S.submode !== 'team') { S.submode = 'team'; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
+    else if (st === 'player' && S.submode !== 'player') { S.submode = 'player'; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); }
   }
 
   applyScrape(d);
@@ -834,6 +833,7 @@ function handleApiMessage(data) {
       const isNew = !S._breakId || S._breakId !== breakId;
       S._breakId = breakId;
       if (isNew) {
+        S._hasApiData = false; // new break — reset API lock
         console.log('[BO] Break ID discovered:', breakId);
         fetchBreakSpots();
       }
@@ -1087,7 +1087,7 @@ function render(force) {
   bo.querySelector("#dragH").onmousedown = e => beginDrag(e, bo);
   bo.querySelectorAll(".rz").forEach(h => { h.onmousedown = e => beginResize(e, bo, h.dataset.e); });
   bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { G.bx = Math.max(10, Math.min(G.x + G.w - 90, window.innerWidth - 100)); G.by = Math.max(60, Math.min(G.y + 6, window.innerHeight - 100)); S.view="collapsed"; render(true); } };
-  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S._manualProduct=true; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); render(true); };
+  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S._manualProduct=true; S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; loadDataset(); render(true); };
   bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; S._manualUnit=true; render(true); };
   bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); S._manualQty=true; render(true); };
 
@@ -1102,9 +1102,9 @@ function render(force) {
   });
   bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render(true);} });
   bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(true); };
-  bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); render(true); };
+  bo.querySelector("#rsB").onclick = () => { S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); render(true); };
   bo.querySelector("#clB").onclick = () => { S.availSet.clear(); S.items.forEach(i=>{i.available=false;S.soldSet.add(i.name);}); render(true); };
-  bo.querySelector("#syncB").onclick = () => { S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); doScrape(); };
+  bo.querySelector("#syncB").onclick = () => { S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); fetchBreakSpots(); doScrape(); };
   // Toggle buttons in rows
   bo.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available){S.soldSet.delete(nm);S.availSet.add(nm);const idx=S.spotOrder.indexOf(nm);if(idx>=0)S.spotOrder.splice(idx,1);}else{S.soldSet.add(nm);S.availSet.delete(nm);if(!S.spotOrder.includes(nm))S.spotOrder.push(nm);} it.spotNum=S.spotOrder.indexOf(nm)>=0?S.spotOrder.indexOf(nm)+1:0; render(true); }; });
 
