@@ -344,7 +344,27 @@ const S = {
   _hasApiData: false,       // true once API data received — locks out DOM overwrite
   spotOrder: [],            // string[] — names in pick order
   currentBid: null,         // current auction bid price
+  _customizeOpen: false,    // customize panel open?
+  _customWeights: {},       // user-edited weights: { name: weight }
+  _customSearch: "",        // search within customize panel
 };
+
+// Load/save custom weights from chrome.storage.local
+function loadCustomWeights() {
+  try {
+    chrome.storage.local.get(['customWeights'], (r) => {
+      if (r.customWeights) { S._customWeights = r.customWeights; applyCustomWeights(); }
+    });
+  } catch {}
+}
+function saveCustomWeights() {
+  try { chrome.storage.local.set({ customWeights: S._customWeights }); } catch {}
+}
+function applyCustomWeights() {
+  for (const it of S.items) {
+    if (S._customWeights[it.name] !== undefined) it.weight = S._customWeights[it.name];
+  }
+}
 
 function loadDataset() {
   let src;
@@ -353,6 +373,7 @@ function loadDataset() {
   else if (S.league === "nfl" && S.submode === "player") src = NFL_PLAYERS;
   else src = NFL_TEAMS;
   S.items = src.map(s => ({ name: s.name, weight: s.weight, tier: s.tier || null, available: !S.soldSet.has(s.name), spotNum: 0, dollarVal: 0 }));
+  applyCustomWeights();
 }
 
 // ================================================================
@@ -1052,6 +1073,10 @@ function createRoot() {
   shadow = root.attachShadow({ mode: "open" });
   const st = document.createElement("style"); st.textContent = CSS; shadow.appendChild(st);
   const el = document.createElement("div"); el.id = "bo"; shadow.appendChild(el);
+  // When user finishes interacting with inputs, do pending render
+  shadow.addEventListener('focusout', () => {
+    if (_renderPending) setTimeout(() => render(true), 50);
+  }, true);
 }
 
 // ================================================================
@@ -1104,12 +1129,16 @@ function wasDrag() { return IX.moved; }
 // ================================================================
 // RENDER
 // ================================================================
+let _renderPending = false;
 function render(force) {
   if (IX.type) return;  // NEVER re-render during drag/resize
-  if (!force) {
-    const active = shadow.activeElement || shadow.querySelector(":focus");
-    if (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) return;
+  // Always protect user interaction — never rebuild while typing or selecting
+  const active = shadow.activeElement || shadow.querySelector(":focus");
+  if (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) {
+    _renderPending = true;
+    return;
   }
+  _renderPending = false;
 
   // Save scroll position
   const lb = shadow.getElementById("lb");
@@ -1184,10 +1213,22 @@ function render(force) {
       const icon = isGood ? "\u2705" : "\u26A0\uFE0F";
       return `<div class="deal ${cls2}"><span class="deal-bid">BID: $${S.currentBid}</span><span class="deal-vs">vs</span><span class="deal-ev">EV: $${ev.toFixed(0)}</span><span class="deal-diff">${icon} ${diffStr}</span></div>`;
     })() : '<div class="deal deal-wait">Waiting for bid...</div>'}
-    <div class="tb2"><input type="text" id="srch" class="si" placeholder="Search..." value="${S.search||""}"><div class="fr">${fBtn("all","All")}${fBtn("available","Avail")}${fBtn("sold","Sold")}${fBtn("high","High$")}</div></div>
+    <div class="tb2"><div class="si-wrap"><input type="text" id="srch" class="si" placeholder="Search..." value="${S.search||""}" autocomplete="off"><div id="acDrop" class="ac-drop"></div></div><div class="fr">${fBtn("all","All")}${fBtn("available","Avail")}${fBtn("sold","Sold")}${fBtn("high","High$")}</div></div>
     <div class="lh"><span></span><span>NAME</span><span>VALUE</span><span></span></div>
     <div id="lb" class="lb">${rows}</div>
-    <div class="ft"><button id="syncB" class="ftb accent">\u27F3 Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
+    ${S._customizeOpen ? (() => {
+      const cq = S._customSearch.toLowerCase();
+      let cItems = [...S.items].sort((a,b) => b.weight - a.weight);
+      if (cq) cItems = cItems.filter(i => i.name.toLowerCase().includes(cq));
+      cItems = cItems.slice(0, 50);
+      const totalW = S.items.reduce((s,i) => s + i.weight, 0) || 1;
+      const cRows = cItems.map(i => {
+        const pct = ((i.weight / totalW) * 100).toFixed(2);
+        return `<div class="cr" data-n="${i.name.replace(/"/g,"&quot;")}"><span class="crn">${i.name}</span><input type="number" class="cwi" value="${i.weight}" step="0.1" min="0"><span class="cpct">${pct}%</span></div>`;
+      }).join("");
+      return `<div class="cust-panel"><div class="cust-hd"><span class="cust-title">Customize Weights</span><button id="custClose" class="ib" title="Close">\u2715</button></div><input type="text" id="custSrch" class="si cust-si" placeholder="Search items..." value="${S._customSearch||""}"><div class="cust-list">${cRows}</div><div class="cust-ft"><button id="custSave" class="ftb accent">Save</button><button id="custReset" class="ftb">Reset Defaults</button></div></div>`;
+    })() : ""}
+    <div class="ft"><button id="custB" class="ftb">Customize</button><button id="syncB" class="ftb accent">\u27F3 Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
     <div class="rz rz-n" data-e="n"></div><div class="rz rz-s" data-e="s"></div><div class="rz rz-e" data-e="e"></div><div class="rz rz-w" data-e="w"></div>
     <div class="rz rz-ne" data-e="ne"></div><div class="rz rz-nw" data-e="nw"></div><div class="rz rz-se" data-e="se"></div><div class="rz rz-sw" data-e="sw"></div>
   `;
@@ -1203,10 +1244,77 @@ function render(force) {
   bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S._manualLeague=true;S.soldSet.clear();S.availSet.clear();S.spotOrder=[];loadDataset();doScrape();} });
   bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S._manualSubmode=true;S.soldSet.clear();S.availSet.clear();S.spotOrder=[];loadDataset();doScrape();} });
   bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render(true);} });
-  bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(true); };
+  const srchEl = bo.querySelector("#srch");
+  const acDrop = bo.querySelector("#acDrop");
+  srchEl.oninput = e => {
+    S.search = e.target.value;
+    // Show autocomplete suggestions
+    const q = S.search.toLowerCase();
+    if (q.length >= 1) {
+      const matches = S.items.filter(i => i.name.toLowerCase().includes(q)).slice(0, 6);
+      acDrop.innerHTML = matches.map(m => `<div class="ac-item" data-n="${m.name.replace(/"/g,"&quot;")}">${m.name}</div>`).join("");
+      acDrop.style.display = matches.length ? "block" : "none";
+      acDrop.querySelectorAll(".ac-item").forEach(item => {
+        item.onmousedown = ev => { ev.preventDefault(); S.search = item.dataset.n; acDrop.style.display = "none"; render(true); };
+      });
+    } else { acDrop.style.display = "none"; }
+    // Filter list without full re-render (just update rows)
+    const lb2 = bo.querySelector("#lb");
+    if (lb2) {
+      let filtered = [...S.items].sort((a,b) => b.dollarVal - a.dollarVal);
+      if (S.filter === "available") filtered = filtered.filter(i => i.available);
+      else if (S.filter === "sold") filtered = filtered.filter(i => !i.available);
+      else if (S.filter === "high") filtered = filtered.filter(i => i.dollarVal > 100);
+      if (q) filtered = filtered.filter(i => i.name.toLowerCase().includes(q));
+      let r2 = "";
+      for (const it of filtered) {
+        const cls = it.available ? "av" : "sd";
+        const valStr = "$" + (it.dollarVal >= 1000 ? it.dollarVal.toLocaleString(undefined,{maximumFractionDigits:0}) : it.dollarVal.toFixed(0));
+        const valCls = it.dollarVal > 500 ? "hot" : it.dollarVal > 100 ? "warm" : "";
+        r2 += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span><button class="tb">${it.available?"\u2212":"+"}</button></div>`;
+      }
+      lb2.innerHTML = r2;
+      lb2.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available){S.soldSet.delete(nm);S.availSet.add(nm);const idx=S.spotOrder.indexOf(nm);if(idx>=0)S.spotOrder.splice(idx,1);}else{S.soldSet.add(nm);S.availSet.delete(nm);if(!S.spotOrder.includes(nm))S.spotOrder.push(nm);} it.spotNum=S.spotOrder.indexOf(nm)>=0?S.spotOrder.indexOf(nm)+1:0; render(true); }; });
+    }
+  };
+  srchEl.addEventListener("blur", () => { setTimeout(() => { acDrop.style.display = "none"; }, 150); });
   bo.querySelector("#rsB").onclick = () => { S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); render(true); };
   bo.querySelector("#clB").onclick = () => { S.availSet.clear(); S.items.forEach(i=>{i.available=false;S.soldSet.add(i.name);}); render(true); };
   bo.querySelector("#syncB").onclick = () => { S._hasApiData=false; S.soldSet.clear(); S.availSet.clear(); S.spotOrder=[]; S.items.forEach(i=>{i.available=true;i.spotNum=0;}); fetchBreakSpots(); doScrape(); };
+  bo.querySelector("#custB").onclick = () => { S._customizeOpen = !S._customizeOpen; S._customSearch = ""; render(true); };
+  // Customize panel events
+  if (S._customizeOpen) {
+    const custClose = bo.querySelector("#custClose");
+    if (custClose) custClose.onclick = () => { S._customizeOpen = false; render(true); };
+    const custSrch = bo.querySelector("#custSrch");
+    if (custSrch) custSrch.oninput = e => { S._customSearch = e.target.value; render(true); };
+    const custSave = bo.querySelector("#custSave");
+    if (custSave) custSave.onclick = () => {
+      bo.querySelectorAll(".cr").forEach(row => {
+        const name = row.dataset.n;
+        const input = row.querySelector(".cwi");
+        if (name && input) {
+          const val = parseFloat(input.value);
+          if (!isNaN(val) && val >= 0) {
+            S._customWeights[name] = val;
+            const it = S.items.find(i => i.name === name);
+            if (it) it.weight = val;
+          }
+        }
+      });
+      saveCustomWeights();
+      S._customizeOpen = false;
+      render(true);
+    };
+    const custReset = bo.querySelector("#custReset");
+    if (custReset) custReset.onclick = () => {
+      S._customWeights = {};
+      saveCustomWeights();
+      loadDataset();
+      S._customizeOpen = false;
+      render(true);
+    };
+  }
   // Toggle buttons in rows
   bo.querySelectorAll(".tb").forEach(btn => { btn.onclick=()=>{ const nm=btn.closest(".r").dataset.n; const it=S.items.find(i=>i.name===nm); if(!it)return; it.available=!it.available; if(it.available){S.soldSet.delete(nm);S.availSet.add(nm);const idx=S.spotOrder.indexOf(nm);if(idx>=0)S.spotOrder.splice(idx,1);}else{S.soldSet.add(nm);S.availSet.delete(nm);if(!S.spotOrder.includes(nm))S.spotOrder.push(nm);} it.spotNum=S.spotOrder.indexOf(nm)>=0?S.spotOrder.indexOf(nm)+1:0; render(true); }; });
 
@@ -1351,6 +1459,24 @@ const CSS = `
 .ftb{padding:3px 10px;background:#161f32;border:1px solid #1e2a45;border-radius:4px;color:#7b8ba8;font-size:10px;cursor:pointer;transition:all .12s;font-family:inherit;white-space:nowrap}
 .ftb:hover{border-color:#00ff87;color:#00ff87}
 .ftb.accent{border-color:#00ff87;color:#00ff87}
+.si-wrap{position:relative;flex:1;min-width:80px}
+.si-wrap .si{width:100%}
+.ac-drop{display:none;position:absolute;top:100%;left:0;right:0;background:#161f32;border:1px solid #1e2a45;border-top:none;border-radius:0 0 4px 4px;z-index:50;max-height:180px;overflow-y:auto}
+.ac-item{padding:5px 8px;font-size:12px;color:#e8ecf4;cursor:pointer;border-bottom:1px solid #1e2a45}
+.ac-item:hover{background:#1c2742;color:#00ff87}
+.ac-item:last-child{border-bottom:none}
+.cust-panel{background:#0b1018;border-top:1px solid #1e2a45;border-bottom:1px solid #1e2a45;display:flex;flex-direction:column;max-height:300px}
+.cust-hd{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#0f1520;border-bottom:1px solid #1e2a45}
+.cust-title{font-weight:700;font-size:12px;color:#00ff87;letter-spacing:1px;font-family:monospace}
+.cust-si{margin:6px 12px;width:calc(100% - 24px)}
+.cust-list{flex:1;overflow-y:auto;min-height:0;max-height:200px;padding:0 12px}
+.cust-list::-webkit-scrollbar{width:4px}.cust-list::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:2px}
+.cr{display:grid;grid-template-columns:1fr 70px 50px;gap:6px;padding:4px 0;border-bottom:1px solid #1e2a45;align-items:center}
+.crn{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cwi{width:100%;padding:3px 6px;background:#161f32;border:1px solid #1e2a45;border-radius:3px;color:#e8ecf4;font-size:11px;font-family:monospace;outline:none;text-align:right}
+.cwi:focus{border-color:#00ff87}
+.cpct{font-size:10px;color:#7b8ba8;font-family:monospace;text-align:right}
+.cust-ft{display:flex;gap:6px;padding:8px 12px;justify-content:flex-end;border-top:1px solid #1e2a45}
 `;
 
 // ================================================================
@@ -1377,6 +1503,7 @@ function discoverBreakId() {
 
 loadDataset();
 createRoot();
+loadCustomWeights();
 render(true);
 startObserver();
 startAuto();
