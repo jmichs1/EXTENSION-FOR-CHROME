@@ -296,10 +296,13 @@ const PRODUCTS = [
 const G = { x: window.innerWidth - 345, y: 0, w: 340, h: window.innerHeight, bx: window.innerWidth - 60, by: 10 };
 
 const S = {
-  league: "nba", submode: "player", items: [], view: "open",
-  filter: "all", search: "",
+  league: "nba", submode: "player", _manualLeague: false, _manualSubmode: false, items: [], view: "open",
+  filter: "all", search: "", sort: "value-desc",
   breakName: null, spotsLeft: null, totalSpots: 0, soldSet: new Set(),
   productId: "sapphire", unit: "box", qty: 1,
+  _manualProduct: false,   // user manually selected product type
+  _manualUnit: false,      // user manually selected box/case
+  _manualQty: false,       // user manually selected quantity
   revenue: 0, bids: [],   // revenue tracker
   lastPrice: null,         // price captured from "Sold" row
   _wasSold: false,         // was "Sold" visible last scrape?
@@ -348,6 +351,13 @@ function scrape() {
   for (const {t} of texts) { if (/BREAK|CASE|RANDOM|SAPPHIRE|MIDNIGHT/i.test(t) && t.length > 15 && t.length < 200) { r.breakName = t.substring(0,80); break; } }
   // Also detect "Random Team" / "Random Player" label
   for (const {t} of texts) { if (/^Random\s+(Team|Player)$/i.test(t)) { r.breakType = t; break; } }
+  // Collect all product/sport/mode-related text snippets for auto-detect
+  r.productTexts = [];
+  for (const {t} of texts) {
+    if (t.length > 3 && t.length < 300 && /SAPPHIRE|MIDNIGHT|TOPPS|CHROME|HOBBY|\bBOX\b|\bCASE\b|\d+\s*[X×]|[X×]\s*\d+|\bNBA\b|\bNFL\b|BASKETBALL|FOOTBALL|\bTEAM\b|\bPLAYER\b/i.test(t)) {
+      r.productTexts.push(t);
+    }
+  }
   for (const {t} of texts) { const m = t.match(/(\d+)\s+of\s+(\d+)\s+left/i); if (m) { r.spotsLeft = +m[1]; r.totalSpots = +m[2]; break; } }
   if (r.spotsLeft === null) { for (const {t} of texts) { const m = t.match(/(\d+)\s+left/i); if (m) { r.spotsLeft = +m[1]; break; } } }
 
@@ -463,39 +473,52 @@ function parseBreakTitle(title) {
   if (!title) return;
   const t = title.toUpperCase();
 
-  // Product detection
-  if (/MIDNIGHT/i.test(t) && S.productId !== "midnight") {
-    S.productId = "midnight"; loadDataset();
-  } else if (/SAPPHIRE/i.test(t) && S.productId !== "sapphire") {
-    S.productId = "sapphire"; loadDataset();
+  // Product detection (skip if user manually selected)
+  if (!S._manualProduct) {
+    if (/MIDNIGHT/i.test(t) && S.productId !== "midnight") {
+      S.productId = "midnight"; loadDataset();
+    } else if (/SAPPHIRE/i.test(t) && S.productId !== "sapphire") {
+      S.productId = "sapphire"; loadDataset();
+    }
   }
 
-  // Unit detection: "CASE" or "BOX"
-  if (/\bCASE\b/i.test(t)) S.unit = "case";
-  else if (/\bBOX\b/i.test(t)) S.unit = "box";
-
-  // Quantity: look for patterns like "2 CASE", "x3", "3x", "× 2"
-  const qm = t.match(/(\d+)\s*(?:CASE|BOX)/i) || t.match(/[X×]\s*(\d+)/i) || t.match(/(\d+)\s*[X×]/i);
-  if (qm) { const q = parseInt(qm[1]); if (q >= 1 && q <= 10) S.qty = q; }
-
-  // League detection
-  if (/\bNBA\b/i.test(t) && S.league !== "nba") {
-    S.league = "nba"; S.soldSet.clear(); loadDataset();
-  } else if (/\bNFL\b/i.test(t) && S.league !== "nfl") {
-    S.league = "nfl"; S.soldSet.clear(); loadDataset();
+  // Unit detection: "CASE" or "BOX" (skip if user manually selected)
+  if (!S._manualUnit) {
+    if (/\bCASE\b/i.test(t)) S.unit = "case";
+    else if (/\bBOX\b/i.test(t)) S.unit = "box";
   }
 
-  // Submode detection: "RANDOM TEAM" → team mode, "RANDOM PLAYER" → player mode
-  if (/\bTEAM\b/i.test(t) && S.submode !== "team") {
-    S.submode = "team"; S.soldSet.clear(); loadDataset();
-  } else if (/\bPLAYER\b/i.test(t) && S.submode !== "player") {
-    S.submode = "player"; S.soldSet.clear(); loadDataset();
+  // Quantity: look for patterns like "2 CASE", "x3", "3x", "× 2" (skip if user manually selected)
+  if (!S._manualQty) {
+    const qm = t.match(/(\d+)\s*(?:CASE|BOX)/i) || t.match(/[X×]\s*(\d+)/i) || t.match(/(\d+)\s*[X×]/i);
+    if (qm) { const q = parseInt(qm[1]); if (q >= 1 && q <= 10) S.qty = q; }
+  }
+
+  // League detection (skip if user manually selected)
+  if (!S._manualLeague) {
+    if ((/\bNBA\b/i.test(t) || /\bBASKETBALL\b/i.test(t)) && S.league !== "nba") {
+      S.league = "nba"; S.soldSet.clear(); loadDataset();
+    } else if ((/\bNFL\b/i.test(t) || /\bFOOTBALL\b/i.test(t)) && S.league !== "nfl") {
+      S.league = "nfl"; S.soldSet.clear(); loadDataset();
+    }
+  }
+
+  // Submode detection: "RANDOM TEAM" / "Team Break" → team, "RANDOM PLAYER" / "Player Break" → player
+  // Skip if user manually toggled submode
+  if (!S._manualSubmode) {
+    if (/\bTEAM\s*(BREAK|RANDOM)|\bRANDOM\s*TEAM\b|\bTEAM\b/i.test(t) && S.submode !== "team") {
+      S.submode = "team"; S.soldSet.clear(); loadDataset();
+    } else if (/\bPLAYER\s*(BREAK|RANDOM)|\bRANDOM\s*PLAYER\b|\bPLAYER\b/i.test(t) && S.submode !== "player") {
+      S.submode = "player"; S.soldSet.clear(); loadDataset();
+    }
   }
 }
 
 function applyScrape(d) {
   if (d.breakName) { S.breakName = d.breakName; parseBreakTitle(d.breakName); }
   if (d.breakType) parseBreakTitle(d.breakType);
+  // Feed additional product text snippets into auto-detect
+  if (d.productTexts) { for (const pt of d.productTexts) parseBreakTitle(pt); }
   if (d.spotsLeft !== null) S.spotsLeft = d.spotsLeft;
   if (d.totalSpots > 0) S.totalSpots = d.totalSpots;
 
@@ -653,7 +676,7 @@ document.addEventListener("mousemove", e => {
   }
 });
 
-document.addEventListener("mouseup", () => { IX.type = null; });
+document.addEventListener("mouseup", () => { IX.type = null; requestAnimationFrame(() => { IX.moved = false; }); });
 
 function beginDrag(e, el) { if (e.target.closest("input,select,button")) return; IX.type="drag"; IX.el=el; IX.moved=false; IX.sx=e.clientX; IX.sy=e.clientY; IX.og={...G}; e.preventDefault(); }
 function beginBDrag(e, el) { IX.type="bdrag"; IX.el=el; IX.moved=false; IX.sx=e.clientX; IX.sy=e.clientY; IX.og={...G}; e.preventDefault(); }
@@ -685,13 +708,15 @@ function render() {
 
   // ---- OPEN ----
   bo.className = "panel";
+  bo.onmousedown = null;  // clear stale bubble drag handler from collapsed mode
   geoToStyle(bo);
 
   const brkLine = S.breakName ? S.breakName.substring(0, 55) + (S.breakName.length > 55 ? "..." : "") : "Waiting for data...";
   const cntLine = S.spotsLeft !== null ? `${S.spotsLeft} of ${S.totalSpots} left` : "";
 
   let items = [...S.items];
-  items.sort((a, b) => { if (a.available !== b.available) return a.available ? -1 : 1; if (a.available) return b.dollarVal - a.dollarVal; return a.name.localeCompare(b.name); });
+  const sortFn = (a, b) => { switch(S.sort) { case "name-asc": return a.name.localeCompare(b.name); case "name-desc": return b.name.localeCompare(a.name); case "value-asc": return a.dollarVal - b.dollarVal; default: return b.dollarVal - a.dollarVal; } };
+  items.sort((a, b) => { if (a.available !== b.available) return a.available ? -1 : 1; return sortFn(a, b); });
   if (S.filter === "available") items = items.filter(i => i.available);
   else if (S.filter === "sold") items = items.filter(i => !i.available);
   else if (S.filter === "high") items = items.filter(i => i.dollarVal > 50);
@@ -702,13 +727,14 @@ function render() {
     const cls = it.available ? "av" : "sd";
     const valStr = it.available ? "$" + it.dollarVal.toFixed(0) : "—";
     const valCls = it.dollarVal > 500 ? "hot" : it.dollarVal > 50 ? "warm" : "";
-    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span><button class="tb">${it.available?"−":"+"}</button></div>`;
+    rows += `<div class="r ${cls}" data-n="${it.name.replace(/"/g,"&quot;")}"><button class="tb">${it.available?"−":"+"}</button><span class="d ${it.available?"on":"off"}"></span><span class="rn">${it.name}</span><span class="rp ${valCls}">${valStr}</span></div>`;
   }
   const fBtn = (f,l) => `<button class="fb${S.filter===f?" fa":""}" data-f="${f}">${l}</button>`;
   const prodOpts = PRODUCTS.map(p=>`<option value="${p.id}"${S.productId===p.id?" selected":""}>${p.name}</option>`).join("");
   const qtyOpts = Array.from({length:10},(_,i)=>`<option value="${i+1}"${S.qty===(i+1)?" selected":""}>${i+1}</option>`).join("");
   const product = PRODUCTS.find(p=>p.id===S.productId)||PRODUCTS[0];
   const unitPrice = S.unit==="case"?product.case:product.box;
+  const si = (col) => S.sort.startsWith(col) ? (S.sort.endsWith("asc") ? " ▲" : " ▼") : "";
 
   bo.innerHTML = `
     <div class="hd" id="dragH"><div class="hl"><span class="lg">🏀 BREAK ODDS</span><span class="bn">${brkLine}</span>${cntLine?`<span class="cl">${cntLine}</span>`:""}</div><div class="hb"><button id="colBtn" class="ib" title="Collapse">◁</button></div></div>
@@ -718,7 +744,7 @@ function render() {
     <div class="mb sub"><button class="sm-btn${S.submode==="player"?" ma":""}" data-sm="player">🃏 Player</button><button class="sm-btn${S.submode==="team"?" ma":""}" data-sm="team">🏅 Team</button></div>
     <div class="sb"><div class="s"><span class="sv">${odds.avail}</span><span class="sn">Avail</span></div><div class="s"><span class="sv">${odds.sold}</span><span class="sn">Sold</span></div><div class="s"><span class="sv">${odds.total}</span><span class="sn">Total</span></div><div class="s ev"><span class="sv">$${odds.evPerSpot}</span><span class="sn">EV/Spot</span></div></div>
     <div class="tb2"><input type="text" id="srch" class="si" placeholder="Search..." value="${S.search||""}"><div class="fr">${fBtn("all","All")}${fBtn("available","Avail")}${fBtn("sold","Sold")}${fBtn("high","High$")}</div></div>
-    <div class="lh"><span></span><span>Name</span><span>Value</span><span></span></div>
+    <div class="lh"><span></span><span></span><span class="sh" data-s="name">Name${si("name")}</span><span class="sh" data-s="value">Value${si("value")}</span></div>
     <div id="lb" class="lb">${rows}</div>
     <div class="ft"><button id="syncB" class="ftb accent">⟳ Resync</button><button id="rsB" class="ftb">Reset All</button><button id="clB" class="ftb">Clear All</button></div>
     <div class="rz rz-n" data-e="n"></div><div class="rz rz-s" data-e="s"></div><div class="rz rz-e" data-e="e"></div><div class="rz rz-w" data-e="w"></div>
@@ -729,14 +755,15 @@ function render() {
   bo.querySelector("#dragH").onmousedown = e => beginDrag(e, bo);
   bo.querySelectorAll(".rz").forEach(h => { h.onmousedown = e => beginResize(e, bo, h.dataset.e); });
   bo.querySelector("#colBtn").onclick = () => { if (!wasDrag()) { S.view="collapsed"; render(); } };
-  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S.soldSet.clear(); loadDataset(); render(); };
-  bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; render(); };
-  bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); render(); };
+  bo.querySelector("#prodSel").onchange = e => { S.productId=e.target.value; S._manualProduct=true; S.soldSet.clear(); loadDataset(); render(); };
+  bo.querySelector("#unitSel").onchange = e => { S.unit=e.target.value; S._manualUnit=true; render(); };
+  bo.querySelector("#qtySel").onchange  = e => { S.qty=parseInt(e.target.value); S._manualQty=true; render(); };
 
 
 
-  bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S.soldSet.clear();loadDataset();doScrape();} });
-  bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S.soldSet.clear();loadDataset();doScrape();} });
+  bo.querySelectorAll(".lg-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.league=b.dataset.lg;S._manualLeague=true;S.soldSet.clear();loadDataset();doScrape();} });
+  bo.querySelectorAll(".sm-btn").forEach(b => b.onclick = () => { if(!wasDrag()){S.submode=b.dataset.sm;S._manualSubmode=true;S.soldSet.clear();loadDataset();doScrape();} });
+  bo.querySelectorAll(".sh").forEach(h => h.onclick = () => { const col = h.dataset.s; S.sort = S.sort === col + "-desc" ? col + "-asc" : col + "-desc"; render(); });
   bo.querySelectorAll(".fb").forEach(b => b.onclick = () => { if(!wasDrag()){S.filter=b.dataset.f;render();} });
   bo.querySelector("#srch").oninput = e => { S.search=e.target.value; render(); };
   bo.querySelector("#rsB").onclick = () => { S.soldSet.clear(); S.items.forEach(i=>i.available=true); render(); };
@@ -748,7 +775,7 @@ function render() {
 }
 
 function doScrape() {
-  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| sold?:",!!d.hasSold,"| $:",d.auctionPrice,"| name:",d.auctionName||"-","| coming:",d.comingUp||"-","| avail:",d.availNames.length,"| sold:",d.soldNames.length,"| soldSet:",S.soldSet.size); applyScrape(d); render(); } catch(e){console.error("[BO] err:",e);}
+  try { const d=scrape(); console.log("[BO] spots:",S.spotsLeft,"| sold?:",!!d.hasSold,"| $:",d.auctionPrice,"| name:",d.auctionName||"-","| coming:",d.comingUp||"-","| avail:",d.availNames.length,"| sold:",d.soldNames.length,"| soldSet:",S.soldSet.size); applyScrape(d); const active=shadow.activeElement; if(active&&(active.tagName==='SELECT'||active.tagName==='INPUT')) return; render(); } catch(e){console.error("[BO] err:",e);}
 }
 
 
@@ -775,9 +802,11 @@ const CSS = `
 :host{all:initial}*{margin:0;padding:0;box-sizing:border-box}
 
 .collapsed{position:fixed;cursor:grab;user-select:none;pointer-events:auto;z-index:2147483647}
-.fab{width:48px;height:48px;border-radius:50%;background:#0a0e17;border:2px solid #00ff87;font-size:22px;cursor:grab;box-shadow:0 4px 24px rgba(0,0,0,.6);transition:transform .15s;position:relative;display:flex;align-items:center;justify-content:center}
-.fab:hover{transform:scale(1.1)}
-.fab-badge{position:absolute;bottom:-6px;right:-8px;background:#00ff87;color:#080c14;font-size:9px;font-weight:800;padding:2px 5px;border-radius:8px;font-family:monospace;white-space:nowrap}
+.fab{width:58px;height:58px;border-radius:50%;background:#0a0e17;border:2.5px solid #00ff87;font-size:26px;cursor:grab;box-shadow:0 0 8px rgba(0,255,135,.4);transition:transform .15s;position:relative;display:flex;align-items:center;justify-content:center;animation:breathe 14s linear infinite,pulse 14s linear infinite}
+.fab:hover{transform:scale(1.1);animation-play-state:paused}
+@keyframes breathe{0%{border-color:#00ff87;box-shadow:0 0 10px rgba(0,255,135,.6),0 0 25px rgba(0,255,135,.2),0 0 50px rgba(0,255,135,.08)}8%{border-color:#10efaa;box-shadow:0 0 12px rgba(16,239,170,.65),0 0 28px rgba(16,239,170,.22),0 0 52px rgba(16,239,170,.09)}16%{border-color:#30c9dd;box-shadow:0 0 16px rgba(48,201,221,.75),0 0 34px rgba(48,201,221,.28),0 0 58px rgba(48,201,221,.11)}25%{border-color:#40b9ff;box-shadow:0 0 18px rgba(64,185,255,.8),0 0 38px rgba(64,185,255,.3),0 0 65px rgba(64,185,255,.12)}33%{border-color:#68acfe;box-shadow:0 0 19px rgba(104,172,254,.82),0 0 40px rgba(104,172,254,.31),0 0 68px rgba(104,172,254,.13)}42%{border-color:#8fa0fe;box-shadow:0 0 20px rgba(143,160,254,.85),0 0 42px rgba(143,160,254,.32),0 0 70px rgba(143,160,254,.14)}50%{border-color:#CEA2FD;box-shadow:0 0 22px rgba(206,162,253,.9),0 0 45px rgba(206,162,253,.35),0 0 75px rgba(206,162,253,.15)}58%{border-color:#e6a4c8;box-shadow:0 0 20px rgba(230,164,200,.85),0 0 42px rgba(230,164,200,.32),0 0 70px rgba(230,164,200,.14)}67%{border-color:#f0b460;box-shadow:0 0 19px rgba(240,180,96,.82),0 0 40px rgba(240,180,96,.31),0 0 68px rgba(240,180,96,.13)}75%{border-color:#ffcc00;box-shadow:0 0 18px rgba(255,204,0,.8),0 0 38px rgba(255,204,0,.3),0 0 65px rgba(255,204,0,.12)}83%{border-color:#c0e622;box-shadow:0 0 16px rgba(192,230,34,.75),0 0 34px rgba(192,230,34,.28),0 0 58px rgba(192,230,34,.11)}92%{border-color:#60f064;box-shadow:0 0 12px rgba(96,240,100,.65),0 0 28px rgba(96,240,100,.22),0 0 52px rgba(96,240,100,.09)}100%{border-color:#00ff87;box-shadow:0 0 10px rgba(0,255,135,.6),0 0 25px rgba(0,255,135,.2),0 0 50px rgba(0,255,135,.08)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+.fab-badge{position:absolute;bottom:-6px;right:-8px;background:#CEA2FD;color:#080c14;font-size:9px;font-weight:800;padding:2px 5px;border-radius:8px;font-family:monospace;white-space:nowrap}
 
 .panel{position:fixed;background:#080c14;border:1px solid #1e2a45;border-radius:8px;display:flex;flex-direction:column;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:13px;color:#e8ecf4;box-shadow:0 8px 40px rgba(0,0,0,.6);user-select:none;overflow:hidden;z-index:2147483647}
 
@@ -841,11 +870,12 @@ const CSS = `
 .fb:hover{border-color:#7b8ba8;color:#7b8ba8}
 .fb.fa{background:rgba(0,255,135,.12);border-color:#00ff87;color:#00ff87}
 
-.lh{display:grid;grid-template-columns:16px 1fr 52px 58px 24px;gap:4px;padding:3px 12px;background:#0f1520;border-bottom:1px solid #1e2a45;font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px}
+.lh{display:grid;grid-template-columns:24px 16px 1fr 60px;gap:4px;padding:3px 12px;background:#0f1520;border-bottom:1px solid #1e2a45;font-size:9px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px}
+.sh{cursor:pointer;transition:color .12s;user-select:none}.sh:hover{color:#00ff87}
 .lb{flex:1;overflow-y:auto;min-height:0}
 .lb::-webkit-scrollbar{width:4px}.lb::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:2px}
 
-.r{display:grid;grid-template-columns:16px 1fr 52px 58px 24px;gap:4px;padding:4px 12px;border-bottom:1px solid #1e2a45;align-items:center;transition:background .1s}
+.r{display:grid;grid-template-columns:24px 16px 1fr 60px;gap:4px;padding:4px 12px;border-bottom:1px solid #1e2a45;align-items:center;transition:background .1s}
 .r:hover{background:#1c2742}.r.av{background:rgba(0,255,135,.02)}
 .r.sd{background:rgba(255,71,87,.06);opacity:.45}.r.sd .rn{text-decoration:line-through}
 
@@ -987,7 +1017,7 @@ function _silentClose(spotsPanel) {
     const label = b.getAttribute('aria-label') || '';
     // Match: × ✕ ✖ X close, or SVG close icons, or aria-label="close"
     if (/^[×✕✖xX]$/.test(t) || /close/i.test(label) || /close/i.test(t)) {
-      b.click();
+      if (typeof b.click === 'function') b.click(); else b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       closed = true;
       console.log("[BO] silentScrape: closed panel via close button");
       break;
