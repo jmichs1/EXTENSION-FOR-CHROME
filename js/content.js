@@ -591,76 +591,6 @@ function applyScrape(d) {
 // GraphQL query for fetching all break spots (simplified from Whatnot's own query)
 const QUERY_BREAK_GQL = `query QueryBreak($id:ID!$getAllSpotOptions:Boolean=true){getBreak(breakId:$id){...Break description spotOptions@include(if:$getAllSpotOptions){...BreakSpotOption __typename}__typename}}fragment Money on Money{amount currency amountSafe __typename}fragment BreakListing on ListingNode{id status price{...Money __typename}transactionType __typename}fragment BreakColors on BreakSpotColors{primaryBackground secondaryBackground title checkbox __typename}fragment Break on Break{id title format status soldSpotCount totalBreakSpots filledBreakSpots spotType defaultTransactionType __typename}fragment BreakSpotOption on BreakSpotOption{id title breakId available description assignedBreakSpot{id title buyer{id username __typename}listing{...BreakListing __typename}__typename}colors{...BreakColors __typename}__typename}`;
 
-// Inject a MAIN world script that monkey-patches fetch to intercept GraphQL responses
-// (may already be injected by js/intercept.js at document_start — __boNetIntercept guard prevents double-patch)
-function injectNetworkInterceptor() {
-  const script = document.createElement('script');
-  script.id = '__bo_net_intercept';
-  script.textContent = `(function(){
-    if(window.__boNetIntercept)return;
-    window.__boNetIntercept=true;
-    if(!window.__boQueue)window.__boQueue=[];
-    function post(msg){window.postMessage(msg,'*');window.__boQueue.push(msg);}
-    function findBreakIds(obj,depth){
-      if(!obj||typeof obj!=='object'||depth>10)return;
-      if(Array.isArray(obj)){for(var i=0;i<obj.length;i++)findBreakIds(obj[i],depth+1);return;}
-      var id=obj.id;
-      if(id&&/^\\d+$/.test(String(id))){
-        if(obj.totalBreakSpots||obj.spotType||obj.format||obj.breakSpotCount||(obj.title&&/break/i.test(obj.title))){
-          post({type:'BO_BREAK_ID',payload:{breakId:String(id)}});
-        }
-      }
-      if(obj.breakId&&/^\\d+$/.test(String(obj.breakId))){
-        post({type:'BO_BREAK_ID',payload:{breakId:String(obj.breakId)}});
-      }
-      for(var k in obj){if(obj.hasOwnProperty(k)){try{findBreakIds(obj[k],depth+1);}catch(e){}}}
-    }
-    var origFetch=window.fetch;
-    window.fetch=async function(){
-      var args=arguments;
-      var url=(typeof args[0]==='string')?args[0]:args[0]?.url||'';
-      if(/graphql/i.test(url)){
-        try{
-          var body=typeof args[1]?.body==='string'?JSON.parse(args[1].body):null;
-          var vid=body?.variables?.id;
-          var vbid=body?.variables?.breakId;
-          var opName=body?.operationName||'';
-          if(/break/i.test(opName)&&vid&&/^\\d+$/.test(String(vid))){
-            post({type:'BO_BREAK_ID',payload:{breakId:String(vid)}});
-          }
-          if(vbid&&/^\\d+$/.test(String(vbid))){
-            post({type:'BO_BREAK_ID',payload:{breakId:String(vbid)}});
-          }
-        }catch(e){}
-      }
-      var response=await origFetch.apply(this,args);
-      try{
-        if(/graphql/i.test(url)){
-          var clone=response.clone();
-          clone.json().then(function(json){
-            var breakId=null;
-            try{
-              var body2=typeof args[1]?.body==='string'?JSON.parse(args[1].body):null;
-              breakId=body2?.variables?.id||null;
-            }catch(e){}
-            if(json?.data?.getBreak){
-              breakId=breakId||json.data.getBreak.id;
-              post({type:'BO_API_DATA',payload:{breakData:json.data.getBreak,breakId:breakId}});
-            }
-            if(breakId&&/^\\d+$/.test(String(breakId))){
-              post({type:'BO_BREAK_ID',payload:{breakId:String(breakId)}});
-            }
-            try{findBreakIds(json?.data,0);}catch(e){}
-          }).catch(function(){});
-        }
-      }catch(e){}
-      return response;
-    };
-  })();`;
-  (document.head || document.documentElement).appendChild(script);
-  script.remove();
-}
-
 // Process API data from either passive interception or active fetch
 function processApiBreakData(breakData, breakId) {
   if (!breakData) return;
@@ -739,19 +669,8 @@ function setupApiListener() {
     if (event.source !== window) return;
     handleApiMessage(event.data);
   });
-  // Drain any messages queued by the early interceptor (js/intercept.js)
-  // __boQueue lives in MAIN world — inject a script to replay it
-  const drain = document.createElement('script');
-  drain.textContent = `(function(){
-    if(window.__boQueue&&window.__boQueue.length){
-      for(var i=0;i<window.__boQueue.length;i++){
-        window.postMessage(window.__boQueue[i],'*');
-      }
-      window.__boQueue=[];
-    }
-  })();`;
-  (document.head || document.documentElement).appendChild(drain);
-  drain.remove();
+  // Ask MAIN world interceptor to replay any queued messages
+  window.postMessage({ type: 'BO_DRAIN_QUEUE' }, '*');
 }
 
 // Actively fetch break spots via GraphQL (no UI interaction needed)
@@ -1298,7 +1217,7 @@ startObserver();
 startAuto();
 
 // Network API interception — primary data source (no UI disruption)
-injectNetworkInterceptor();
+// intercept-main.js runs in MAIN world via manifest, so just set up the listener
 setupApiListener();
 
 // Give interceptor 3s to discover break ID from __NEXT_DATA__ or GraphQL calls, then fetch

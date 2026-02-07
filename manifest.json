@@ -15,8 +15,9 @@
   "content_scripts": [
     {
       "matches": ["https://www.whatnot.com/*", "https://whatnot.com/*"],
-      "js": ["js/intercept.js"],
-      "run_at": "document_start"
+      "js": ["js/intercept-main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
       "matches": ["https://www.whatnot.com/*", "https://whatnot.com/*"],
